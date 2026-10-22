@@ -248,7 +248,16 @@ def lancer_bot_interactif():
                             )
                             envoyer_message_telegram(chat_id, msg)
 
-                        elif texte.startswith("/register"):
+                        elif texte.startswith("/register") or texte.startswith("/register@"):
+                            print(f"DEBUG: Commande /register interceptée pour chat_id={chat_id}")
+                            link = f"{RENDER_EXTERNAL_URL}/login?chat_id={chat_id}"
+                            message_texte = (
+                                "🔗 *Connexion Pilote Google Calendar :*\n\n"
+                                "Cliquez sur ce lien pour autoriser l'accès à votre agenda :\n"
+                                f"{link}"
+                            )
+                            envoyer_message_telegram(chat_id, message_texte)
+                            print(f"DEBUG: Lien /register envoyé avec succès -> {link}")
                             link = f"{RENDER_EXTERNAL_URL}/login?chat_id={chat_id}"
                             envoyer_message_telegram(
                                 chat_id,
