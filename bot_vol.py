@@ -365,5 +365,11 @@ def lancer_bot_interactif():
             time.sleep(5)
         time.sleep(2)
 
+# Lancer Flask et le Bot Telegram en arrière-plan au démarrage
 if __name__ == '__main__':
-    lancer_bot_interactif()
+    # Démarrage du bot Telegram dans un thread séparé
+    threading.Thread(target=lancer_bot_interactif, daemon=True).start()
+
+    # Démarrage de Flask sur le port principal
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
