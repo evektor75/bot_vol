@@ -1,30 +1,44 @@
 import datetime
 import os
 import re
+import json
 import time
 import requests
+import http.server
+import socketserver
+import threading
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-# --- CONFIGURATION ---
-TELEGRAM_TOKEN = "8560528662:AAHX-LMw6OUvnnBdP42gAc90arhQBI-nm9E"
-
-# Ton token Google stocké en dur pour que le bot sache toujours lire ton agenda
-GOOGLE_TOKEN_DATA = {
-    "token": "ya29.a0AX07Cmv3qqR_0RfsE6vow2-l9KOBBzIKf57H8CmdzgapqauXImvhPn4ZqCTKdniKYdeIwrfYXAVuu_RUghy3qReeUZKiuHEO-YZZr-9Ls4Wn6Xgox5UqssOD5BAI8wPKqA1p-xN4NcefU_8udBZj760HNCqvcRaUklV6zFzvS-ibIYTTpdypMX0TZSQWe3PTr4xoBhMaCgYKAc0SARESFQHGX2MilmrWbHGT8wByHPNu5INvQw0206",
-    "refresh_token": "1//03K_5SSgbWpJlCgYIARAAGAMSNwF-L9IrKLGmiHi4Vm7YKNUo0QWMGFZSSyN7qIrpppSAspRmRqUa8du1iQvjcyH-L4QbDKqYcRI",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "client_id": "765453215343-9uqs52ibfac4686tg0b4ofnuf4dt1ga7.apps.googleusercontent.com",
-    "client_secret": "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",
-    "scopes": ["https://www.googleapis.com/auth/calendar.readonly"],
-    "universe_domain": "googleapis.com",
-    "account": "",
-    "expiry": "2026-10-22T08:40:48Z"
-}
+# --- CONFIGURATION SÉCURISÉE ---
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+GOOGLE_TOKEN_JSON = os.environ.get("GOOGLE_TOKEN_JSON")
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
+# 1. PETIT SERVEUR HTTP POUR RENDER & UPTIMEROBOT
+# Render a besoin qu'un port soit ouvert, et UptimeRobot viendra le pinger ici.
+PORT = int(os.environ.get("PORT", 10000))
+
+class HealthCheckHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot 'Ou est Rafael ?' is alive and running!")
+
+def demarrer_serveur_web():
+    with socketserver.TCPServer(("", PORT), HealthCheckHandler) as httpd:
+        print(f"🌐 Serveur web de santé actif sur le port {PORT}")
+        httpd.serve_forever()
+
+# Lancement du serveur web en arrière-plan (thread)
+threading.Thread(target=demarrer_serveur_web, daemon=True).start()
+
+
 def envoyer_message_telegram(chat_id, texte):
+    if not TELEGRAM_TOKEN:
+        print("❌ TELEGRAM_TOKEN manquant !")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -39,40 +53,52 @@ def envoyer_message_telegram(chat_id, texte):
         print(f"Erreur réseau Telegram : {e}")
 
 def obtenir_prochain_vol():
-    import json
-    with open('token.json', 'w') as f:
-        json.dump(GOOGLE_TOKEN_DATA, f)
+    if not GOOGLE_TOKEN_JSON:
+        print("⚠️ GOOGLE_TOKEN_JSON manquant dans les variables d'environnement.")
+        return None
+
+    try:
+        # Reconstruction du token.json à partir de la variable d'environnement
+        token_data = json.loads(GOOGLE_TOKEN_JSON)
+        with open('token.json', 'w') as f:
+            json.dump(token_data, f)
+    except Exception as e:
+        print(f"❌ Erreur lors de l'écriture du token Google : {e}")
+        return None
 
     if not os.path.exists('token.json'):
-        print("⚠️ Fichier token.json introuvable.")
         return None
 
-    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    service = build('calendar', 'v3', credentials=creds)
-    now = datetime.datetime.utcnow().isoformat() + 'Z'
+    try:
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        service = build('calendar', 'v3', credentials=creds)
+        now = datetime.datetime.utcnow().isoformat() + 'Z'
 
-    events_result = service.events().list(
-        calendarId='primary', timeMin=now,
-        maxResults=1, singleEvents=True,
-        orderBy='startTime').execute()
-    events = events_result.get('items', [])
+        events_result = service.events().list(
+            calendarId='primary', timeMin=now,
+            maxResults=1, singleEvents=True,
+            orderBy='startTime').execute()
+        events = events_result.get('items', [])
 
-    if not events:
+        if not events:
+            return None
+
+        event = events[0]
+        titre_vol = event['summary']
+        debut_str = event['start'].get('dateTime', event['start'].get('date'))
+        debut_dt = datetime.datetime.fromisoformat(debut_str)
+
+        match = re.search(r'^([A-Z0-9]+)', titre_vol)
+        numero_vol = match.group(1) if match else titre_vol
+
+        return {
+            "numero": numero_vol,
+            "titre": titre_vol,
+            "debut_dt": debut_dt
+        }
+    except Exception as e:
+        print(f"Erreur Google Calendar : {e}")
         return None
-
-    event = events[0]
-    titre_vol = event['summary']
-    debut_str = event['start'].get('dateTime', event['start'].get('date'))
-    debut_dt = datetime.datetime.fromisoformat(debut_str)
-
-    match = re.search(r'^([A-Z0-9]+)', titre_vol)
-    numero_vol = match.group(1) if match else titre_vol
-
-    return {
-        "numero": numero_vol,
-        "titre": titre_vol,
-        "debut_dt": debut_dt
-    }
 
 def verifier_ads_b(numero_vol):
     url = "https://opensky-network.org/api/states/all"
@@ -105,6 +131,11 @@ def lancer_bot_interactif():
 
     while True:
         try:
+            if not TELEGRAM_TOKEN:
+                print("⚠️ En attente du TELEGRAM_TOKEN...")
+                time.sleep(10)
+                continue
+
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}&timeout=30"
             response = requests.get(url, timeout=35)
             data = response.json()
