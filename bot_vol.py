@@ -15,12 +15,12 @@ from googleapiclient.discovery import build
 
 # --- CONFIGURATION SÉCURISÉE ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CLIENT_SECRET_JSON = os.environ.get("GOOGLE_CLIENT_SECRET_JSON") # Contenu du fichier client_secret.json de Google Cloud
+CLIENT_SECRET_JSON = os.environ.get("GOOGLE_CLIENT_SECRET_JSON")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
-# Unilancer Flask pour le serveur web HTTP et OAuth2
+# Initialisation de Flask (Serveur Web unique)
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super-secret-key-rafael")
 
@@ -32,7 +32,6 @@ DB_FILE = "bot_vols.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # Table des pilotes
     c.execute('''
         CREATE TABLE IF NOT EXISTS pilotes (
             chat_id INTEGER PRIMARY KEY,
@@ -41,7 +40,6 @@ def init_db():
             google_token TEXT
         )
     ''')
-    # Table des proches rattachés aux pilotes
     c.execute('''
         CREATE TABLE IF NOT EXISTS proches (
             chat_id INTEGER PRIMARY KEY,
@@ -58,11 +56,11 @@ def generer_code_invitation():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 # ---------------------------------------------------------------------------
-# SERVEUR WEB FLASK (AUTHENTIFICATION GOOGLE OAUTH2)
+# ROUTES FLASK (OAUTH2 & SANTE)
 # ---------------------------------------------------------------------------
 @app.route('/')
 def home():
-    return "🤖 Serveur Bot Telegram & OAuth actif !"
+    return "🤖 Bot Telegram & OAuth actif !"
 
 @app.route('/login')
 def login():
@@ -105,13 +103,10 @@ def oauth2callback():
         )
         flow.fetch_token(code=code)
         credentials = flow.credentials
-
         token_data = credentials.to_json()
 
-        # Enregistrement du pilote dans la base de données
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-
         c.execute('SELECT code_invitation FROM pilotes WHERE chat_id = ?', (chat_id,))
         row = c.fetchone()
         code_inv = row[0] if row else generer_code_invitation()
@@ -121,31 +116,22 @@ def oauth2callback():
             VALUES (?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET google_token = excluded.google_token
         ''', (chat_id, code_inv, token_data))
-
         conn.commit()
         conn.close()
 
-        # Alerte Telegram de confirmation
         envoyer_message_telegram(
             chat_id,
             f"✅ **Compte Google connecté avec succès !**\n\n"
             f"Votre code d'invitation pour vos proches est : `{code_inv}`\n"
-            f"Partagez-leur ce code pour qu'ils s'abonnent avec la commande :\n`/join {code_inv}`"
+            f"Partagez-leur ce code pour qu'ils s'abonnent avec :\n`/join {code_inv}`"
         )
 
         return "<h1>Connexion réussie !</h1><p>Vous pouvez fermer cette fenêtre et retourner sur Telegram.</p>"
     except Exception as e:
         return f"Erreur lors de la validation OAuth : {e}", 500
 
-
-def demarrer_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-threading.Thread(target=demarrer_flask, daemon=True).start()
-
 # ---------------------------------------------------------------------------
-# LOGIQUE BOT TELEGRAM & REQUÊTES GOOGLE / ADSB
+# LOGIQUE BOT TELEGRAM
 # ---------------------------------------------------------------------------
 def envoyer_message_telegram(chat_id, texte):
     if not TELEGRAM_TOKEN:
@@ -250,7 +236,6 @@ def lancer_bot_interactif():
                         chat_id = update["message"]["chat"]["id"]
                         texte = update["message"]["text"].strip()
 
-                        # --- COMMANDE /start ---
                         if texte.startswith("/start"):
                             msg = (
                                 "👋 **Bienvenue sur le Bot de Suivi de Vol Multi-Pilotes !**\n\n"
@@ -263,7 +248,6 @@ def lancer_bot_interactif():
                             )
                             envoyer_message_telegram(chat_id, msg)
 
-                        # --- COMMANDE /register (Pilote) ---
                         elif texte.startswith("/register"):
                             link = f"{RENDER_EXTERNAL_URL}/login?chat_id={chat_id}"
                             envoyer_message_telegram(
@@ -272,7 +256,6 @@ def lancer_bot_interactif():
                                 f"Cliquez sur ce lien pour autoriser l'accès à votre agenda :\n{link}"
                             )
 
-                        # --- COMMANDE /moncode (Pilote) ---
                         elif texte.startswith("/moncode"):
                             conn = sqlite3.connect(DB_FILE)
                             c = conn.cursor()
@@ -285,7 +268,6 @@ def lancer_bot_interactif():
                             else:
                                 envoyer_message_telegram(chat_id, "❌ Vous n'êtes pas encore enregistré. Tapez `/register` d'abord.")
 
-                        # --- COMMANDE /join CODE (Proche) ---
                         elif texte.startswith("/join"):
                             parts = texte.split()
                             if len(parts) < 2:
@@ -307,17 +289,14 @@ def lancer_bot_interactif():
                                 ''', (chat_id, pilote_id))
                                 conn.commit()
                                 conn.close()
-                                envoyer_message_telegram(chat_id, f"✅ Vous êtes maintenant rattaché au pilote ! Tapez `/vol` pour suivre ses vols.")
+                                envoyer_message_telegram(chat_id, f"✅ Vous êtes rattaché au pilote ! Tapez `/vol` pour voir les vols.")
                             else:
                                 conn.close()
                                 envoyer_message_telegram(chat_id, "❌ Code d'invitation invalide.")
 
-                        # --- COMMANDE /vol (Proche ou Pilote) ---
                         elif texte.startswith("/vol"):
                             conn = sqlite3.connect(DB_FILE)
                             c = conn.cursor()
-
-                            # Vérifie si la personne est un proche abonné
                             c.execute('SELECT pilote_chat_id FROM proches WHERE chat_id = ?', (chat_id,))
                             row_proche = c.fetchone()
 
@@ -325,19 +304,17 @@ def lancer_bot_interactif():
                             if row_proche:
                                 pilote_target_id = row_proche[0]
                             else:
-                                # Vérifie si c'est le pilote lui-même qui fait /vol
                                 c.execute('SELECT chat_id FROM pilotes WHERE chat_id = ?', (chat_id,))
                                 row_pilote = c.fetchone()
                                 if row_pilote:
                                     pilote_target_id = row_pilote[0]
-
                             conn.close()
 
                             if not pilote_target_id:
                                 envoyer_message_telegram(
                                     chat_id,
                                     "🔒 **Accès restreint.**\n"
-                                    "Vous devez entrer le code d'invitation d'un pilote avec `/join CODE` pour accéder à ses vols."
+                                    "Entrez le code d'invitation d'un pilote avec `/join CODE` pour accéder à ses vols."
                                 )
                                 continue
 
@@ -345,7 +322,7 @@ def lancer_bot_interactif():
                             vol = obtenir_prochain_vol_pour_pilote(pilote_target_id)
 
                             if not vol:
-                                envoyer_message_telegram(chat_id, "❌ Aucun vol trouvé dans l'agenda du pilote.")
+                                envoyer_message_telegram(chat_id, "❌ Aucun vol trouvé dans l'agenda.")
                             else:
                                 live = verifier_ads_b(vol['numero'])
                                 statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar."
@@ -365,11 +342,8 @@ def lancer_bot_interactif():
             time.sleep(5)
         time.sleep(2)
 
-# Lancer Flask et le Bot Telegram en arrière-plan au démarrage
+# Lancement global propre (Bot en arrière-plan + Flask au premier plan)
 if __name__ == '__main__':
-    # Démarrage du bot Telegram dans un thread séparé
     threading.Thread(target=lancer_bot_interactif, daemon=True).start()
-
-    # Démarrage de Flask sur le port principal
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
