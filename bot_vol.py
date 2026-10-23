@@ -8,6 +8,7 @@ import string
 import datetime
 import threading
 import requests
+import logging
 from flask import Flask, request, redirect, url_for
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -23,6 +24,12 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 # Initialisation de Flask (Serveur Web unique)
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super-secret-key-rafael")
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
+logger = logging.getLogger("bot_vol")
 
 # Stockage temporaire des code_verifier PKCE, indexé par state
 pending_verifiers = {}
@@ -105,7 +112,10 @@ def oauth2callback():
             scopes=SCOPES,
             redirect_uri=redirect_uri
         )
-        flow.code_verifier = pending_verifiers.pop(chat_id, None)
+        code_verifier = pending_verifiers.pop(chat_id, None)
+        if not code_verifier:
+            raise RuntimeError("code_verifier PKCE introuvable pour cet état OAuth; relancez /register")
+        flow.code_verifier = code_verifier
         flow.fetch_token(code=code)
         credentials = flow.credentials
         token_data = credentials.to_json()
@@ -140,7 +150,8 @@ def oauth2callback():
 # ---------------------------------------------------------------------------
 def envoyer_message_telegram(chat_id, texte):
     if not TELEGRAM_TOKEN:
-        return
+        logger.error("TELEGRAM_TOKEN absent: impossible d'envoyer un message à chat_id=%s", chat_id)
+        return False
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -149,9 +160,41 @@ def envoyer_message_telegram(chat_id, texte):
         "disable_web_page_preview": False
     }
     try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print(f"Erreur envoi Telegram : {e}")
+        response = requests.post(url, json=payload, timeout=10)
+        if not response.ok:
+            logger.error("Telegram sendMessage a échoué (%s): %s", response.status_code, response.text[:500])
+            return False
+        return True
+    except Exception:
+        logger.exception("Erreur envoi Telegram pour chat_id=%s", chat_id)
+        return False
+
+def traiter_commande_register(chat_id):
+    """Construit et envoie le lien OAuth; toute erreur est loggée et signalée."""
+    try:
+        logger.info("Commande /register reçue pour chat_id=%s", chat_id)
+        if not RENDER_EXTERNAL_URL:
+            raise RuntimeError("RENDER_EXTERNAL_URL est vide")
+        link = f"{RENDER_EXTERNAL_URL}/login?chat_id={chat_id}"
+        message_texte = (
+            "🔗 *Connexion Pilote Google Calendar :*\n\n"
+            "Cliquez sur ce lien pour autoriser l'accès à votre agenda :\n"
+            f"{link}"
+        )
+        if not envoyer_message_telegram(chat_id, message_texte):
+            raise RuntimeError("Telegram n'a pas confirmé l'envoi du lien /register")
+        logger.info("Lien /register envoyé pour chat_id=%s: %s", chat_id, link)
+        return True
+    except Exception as exc:
+        logger.exception("Erreur pendant le traitement de /register pour chat_id=%s", chat_id)
+        try:
+            envoyer_message_telegram(
+                chat_id,
+                f"❌ Erreur pendant /register : {exc}\nConsultez les logs du bot pour le détail."
+            )
+        except Exception:
+            logger.exception("Impossible de signaler l'erreur /register à chat_id=%s", chat_id)
+        return False
 
 def extraire_numero_vol(titre_event):
     match = re.search(r'\b([A-Z0-9]{2,3}\s?\d{1,4})\b', titre_event, re.IGNORECASE)
@@ -253,22 +296,8 @@ def lancer_bot_interactif():
                             )
                             envoyer_message_telegram(chat_id, msg)
 
-                        elif texte.startswith("/register") or texte.startswith("/register@"):
-                            print(f"DEBUG: Commande /register interceptée pour chat_id={chat_id}")
-                            link = f"{RENDER_EXTERNAL_URL}/login?chat_id={chat_id}"
-                            message_texte = (
-                                "🔗 *Connexion Pilote Google Calendar :*\n\n"
-                                "Cliquez sur ce lien pour autoriser l'accès à votre agenda :\n"
-                                f"{link}"
-                            )
-                            envoyer_message_telegram(chat_id, message_texte)
-                            print(f"DEBUG: Lien /register envoyé avec succès -> {link}")
-                            link = f"{RENDER_EXTERNAL_URL}/login?chat_id={chat_id}"
-                            envoyer_message_telegram(
-                                chat_id,
-                                f"🔗 **Connexion Pilote Google Calendar :**\n\n"
-                                f"Cliquez sur ce lien pour autoriser l'accès à votre agenda :\n{link}"
-                            )
+                        elif re.match(r"^/register(?:@\w+)?(?:\s|$)", texte, re.IGNORECASE):
+                            traiter_commande_register(chat_id)
 
                         elif texte.startswith("/moncode"):
                             conn = sqlite3.connect(DB_FILE)
@@ -351,8 +380,8 @@ def lancer_bot_interactif():
                                 )
                                 envoyer_message_telegram(chat_id, reponse)
 
-        except Exception as e:
-            print(f"Erreur boucle bot : {e}")
+        except Exception:
+            logger.exception("Erreur boucle bot Telegram")
             time.sleep(5)
         time.sleep(2)
 
