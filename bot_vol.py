@@ -148,23 +148,47 @@ def oauth2callback():
 # ---------------------------------------------------------------------------
 # LOGIQUE BOT TELEGRAM
 # ---------------------------------------------------------------------------
-def envoyer_message_telegram(chat_id, texte):
+def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown"):
+    """Envoie un message Telegram, avec repli en texte brut si Markdown échoue."""
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN absent: impossible d'envoyer un message à chat_id=%s", chat_id)
         return False
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": texte,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": False
-    }
+
+    def construire_payload(mode):
+        payload = {
+            "chat_id": chat_id,
+            "text": texte,
+            "disable_web_page_preview": False
+        }
+        if mode:
+            payload["parse_mode"] = mode
+        return payload
+
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        if not response.ok:
-            logger.error("Telegram sendMessage a échoué (%s): %s", response.status_code, response.text[:500])
+        response = requests.post(url, json=construire_payload(parse_mode), timeout=10)
+        if response.ok:
+            return True
+
+        # Les textes dynamiques (URL, titre d'événement, etc.) peuvent contenir
+        # des caractères spéciaux Markdown. Retenter une seule fois en texte brut.
+        erreur = (getattr(response, "text", "") or "").lower()
+        erreur_entites = response.status_code == 400 and (
+            "can't parse entities" in erreur or "cannot parse entities" in erreur
+        )
+        if parse_mode and erreur_entites:
+            logger.warning("Telegram a rejeté le formatage; nouvel essai en texte brut")
+            fallback = requests.post(url, json=construire_payload(None), timeout=10)
+            if fallback.ok:
+                return True
+            logger.error(
+                "Telegram sendMessage a échoué après repli (%s): %s",
+                fallback.status_code, getattr(fallback, "text", "")[:500]
+            )
             return False
-        return True
+
+        logger.error("Telegram sendMessage a échoué (%s): %s", response.status_code, response.text[:500])
+        return False
     except Exception:
         logger.exception("Erreur envoi Telegram pour chat_id=%s", chat_id)
         return False
@@ -176,12 +200,14 @@ def traiter_commande_register(chat_id):
         if not RENDER_EXTERNAL_URL:
             raise RuntimeError("RENDER_EXTERNAL_URL est vide")
         link = f"{RENDER_EXTERNAL_URL}/login?chat_id={chat_id}"
+        # Texte brut volontairement : l'URL OAuth peut contenir des underscores
+        # et autres caractères interprétés par Telegram Markdown.
         message_texte = (
-            "🔗 *Connexion Pilote Google Calendar :*\n\n"
+            "🔗 Connexion Pilote Google Calendar :\n\n"
             "Cliquez sur ce lien pour autoriser l'accès à votre agenda :\n"
             f"{link}"
         )
-        if not envoyer_message_telegram(chat_id, message_texte):
+        if not envoyer_message_telegram(chat_id, message_texte, parse_mode=None):
             raise RuntimeError("Telegram n'a pas confirmé l'envoi du lien /register")
         logger.info("Lien /register envoyé pour chat_id=%s: %s", chat_id, link)
         return True
