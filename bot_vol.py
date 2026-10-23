@@ -35,11 +35,11 @@ pending_verifiers = {}
 
 TRANSLATIONS = {
     "fr": {
-        "welcome": "👋 Bienvenue sur le Bot de Suivi de Vol Multi-Pilotes !\n\n👨‍✈️ Pilote ?\n• /register pour lier votre Google Calendar.\n• /moncode pour voir votre code d’invitation.\n• /invite pour obtenir un lien à partager.\n\n👪 Proche/Famille ?\n• Cliquez sur un lien d’invitation ou utilisez /join CODE.\n• /vol pour consulter le prochain vol.\n\n🌐 Langue : /lang fr ou /lang en",
-        "help": "Commandes :\n/register — connecter Google Calendar (pilote)\n/moncode — afficher le code d’invitation (pilote)\n/invite — créer le lien d’invitation (pilote)\n/join CODE — s’abonner avec un code\n/vol — consulter le prochain vol\n/status — afficher l’état\n/reconnect — reconnecter Google\n/disconnect — déconnecter Google\n/lang fr|en — changer de langue\n/stop — se désabonner (proche)\n/help — afficher cette aide",
+        "welcome": "👋 Bienvenue sur le Bot de Suivi de Vol Multi-Pilotes !\n\n👨‍✈️ Pilote ?\n• /register pour lier votre Google Calendar.\n• /moncode pour voir votre code d’invitation.\n• /invite pour obtenir un lien à partager.\n\n👪 Proche/Famille ?\n• Cliquez sur un lien d’invitation ou utilisez /join CODE.\n• /vol pour consulter le prochain vol.\n\n🌐 Langue : /lang fr ou /lang en\n\n🔵 = pilote · 🟢 = proche",
+        "help": "Commandes :\n/register — connecter Google Calendar (pilote)\n/moncode — afficher le code d’invitation (pilote)\n/invite — créer le lien d’invitation (pilote)\n/join CODE — s’abonner avec un code\n/vol — consulter le prochain vol\n/status — afficher l’état\n/reconnect — reconnecter Google\n/disconnect — déconnecter Google\n/lang fr|en — changer de langue\n/stop — se désabonner (proche)\n/help — afficher cette aide\n\n🔵 = pilote · 🟢 = proche",
         "register_link": "🔗 Connexion Pilote Google Calendar :\n\nCliquez sur ce lien pour autoriser l’accès à votre agenda :\n{link}", "register_error": "❌ Erreur pendant /register : {error}", "oauth_success": "✅ Compte Google connecté avec succès !\n\nVotre code d’invitation pour vos proches est : {code}\nPartagez-leur ce lien :\n{invite}", "oauth_page": "Connexion réussie ! Vous pouvez fermer cette fenêtre et retourner sur Telegram.", "oauth_fail": "Échec de l’authentification.", "lang_usage": "🌐 Utilisation : /lang fr ou /lang en", "lang_changed": "✅ Langue enregistrée : français.", "lang_changed_en": "✅ Language saved: English.", "code": "🔑 Votre code d’invitation proche est : {code}", "not_registered": "❌ Vous n’êtes pas encore enregistré. Tapez /register d’abord.", "invite": "🔗 Lien à partager avec votre proche :\n{link}", "invite_missing": "❌ Vous devez connecter Google Calendar avec /register avant de créer un lien.", "join_usage": "⚠️ Format incorrect. Utilisez /join CODE.", "joined": "✅ Vous êtes rattaché au pilote ! Tapez /vol pour voir les vols.", "invalid_code": "❌ Code d’invitation invalide.", "stopped": "✅ Vous êtes désabonné.", "not_subscribed": "ℹ️ Vous n’êtes abonné à aucun pilote.", "access": "🔒 Accès restreint. Entrez un code avec /join CODE.", "searching": "🔍 Recherche du prochain vol…", "no_flight": "❌ Aucun vol trouvé dans l’agenda.", "flight": "✈️ Prochain vol :\n\n• Vol : {title}\n• Départ prévu : {date}\n\n📡 Statut radar :\n{status}\n\n🔗 Suivre sur Flightradar24 :\n{link}", "radar_ground": "Au sol 🟢 | Altitude : {altitude}", "radar_air": "En vol ✈️ | Altitude : {altitude}", "radar_missing": "Avion non détecté sur le radar.", "invite_config": "⚠️ BOT_USERNAME n’est pas configuré. Utilisez le code /moncode.", "menu_flights": "Vol en cours", "menu_status": "Statut", "menu_invite": "Inviter", "menu_lang": "Langue FR/EN", "menu_reconnect": "Reconnecter Google", "menu_disconnect": "Déconnecter", "status": "📊 Statut\nLangue : {lang}\nGoogle : {google}\nProches abonnés : {contacts}\nProchain duty : {duty}\nNotifications : {notifications}", "connected": "connecté", "expired": "expiré", "not_connected": "non connecté", "none": "aucun", "enabled": "actives", "disabled": "inactives", "disconnect_confirm": "Voulez-vous révoquer et supprimer vos identifiants Google ?", "disconnect_done": "✅ Google Calendar déconnecté.", "disconnect_cancel": "Déconnexion annulée.", "reconnect_hint": "🔗 Reconnectez Google avec /register.", "calendar_expired": "⚠️ Votre connexion Google a expiré. Reconnectez-la pour recevoir les duties.", "notif_departure": "⏰ Rappel : vol {flight} ({iata}) prévu à {time}.", "notif_takeoff": "🛫 Vol {flight} ({iata}) décollé. ETA : {eta}.", "notif_landing": "🛬 Vol {flight} ({iata}) atterri.", "callback_unknown": "Action inconnue."},
     "en": {
-        "welcome": "👋 Welcome to the Multi-Pilot Flight Tracker!\n\n👨‍✈️ Pilot?\n• /register to link your Google Calendar.\n• /moncode to see your invitation code.\n• /invite to get a shareable link.\n\n👪 Family/Contact?\n• Click an invitation link or use /join CODE.\n• /vol to view the next flight.\n\n🌐 Language: /lang fr or /lang en", "help": "Commands:\n/register — connect Google Calendar\n/moncode — show invitation code\n/invite — create an invitation link\n/join CODE — subscribe with a code\n/vol — view the next flight\n/status — show status\n/reconnect — reconnect Google\n/disconnect — disconnect Google\n/lang fr|en — change language\n/stop — unsubscribe\n/help — show this help", "register_link": "🔗 Pilot Google Calendar connection:\n\nClick this link to authorize your calendar:\n{link}", "register_error": "❌ Error during /register: {error}", "oauth_success": "✅ Google account connected successfully!\n\nYour invitation code is: {code}\nShare this link:\n{invite}", "oauth_page": "Connection successful! You can close this window and return to Telegram.", "oauth_fail": "Authentication failed.", "lang_usage": "🌐 Usage: /lang fr or /lang en", "lang_changed": "✅ Language saved: French.", "lang_changed_en": "✅ Language saved: English.", "code": "🔑 Your invitation code is: {code}", "not_registered": "❌ You are not registered yet. Type /register first.", "invite": "🔗 Link to share with your contact:\n{link}", "invite_missing": "❌ Connect Google Calendar with /register first.", "join_usage": "⚠️ Incorrect format. Use /join CODE.", "joined": "✅ You are now linked to the pilot! Type /vol to view flights.", "invalid_code": "❌ Invalid invitation code.", "stopped": "✅ You are unsubscribed.", "not_subscribed": "ℹ️ You are not subscribed to any pilot.", "access": "🔒 Access restricted. Enter a code with /join CODE.", "searching": "🔍 Looking for the next flight…", "no_flight": "❌ No flight found in the calendar.", "flight": "✈️ Next flight:\n\n• Flight: {title}\n• Scheduled departure: {date}\n\n📡 Radar status:\n{status}\n\n🔗 Track on Flightradar24:\n{link}", "radar_ground": "On ground 🟢 | Altitude: {altitude}", "radar_air": "In flight ✈️ | Altitude: {altitude}", "radar_missing": "Aircraft not detected on radar.", "invite_config": "⚠️ BOT_USERNAME is not configured. Use /moncode.", "menu_flights": "Current flight", "menu_status": "Status", "menu_invite": "Invite", "menu_lang": "Language FR/EN", "menu_reconnect": "Reconnect Google", "menu_disconnect": "Disconnect", "status": "📊 Status\nLanguage: {lang}\nGoogle: {google}\nSubscribed contacts: {contacts}\nNext duty: {duty}\nNotifications: {notifications}", "connected": "connected", "expired": "expired", "not_connected": "not connected", "none": "none", "enabled": "enabled", "disabled": "disabled", "disconnect_confirm": "Revoke and delete your Google credentials?", "disconnect_done": "✅ Google Calendar disconnected.", "disconnect_cancel": "Disconnect cancelled.", "reconnect_hint": "🔗 Reconnect Google with /register.", "calendar_expired": "⚠️ Your Google connection expired. Reconnect to receive duties.", "notif_departure": "⏰ Reminder: flight {flight} ({iata}) scheduled at {time}.", "notif_takeoff": "🛫 Flight {flight} ({iata}) took off. ETA: {eta}.", "notif_landing": "🛬 Flight {flight} landed.", "callback_unknown": "Unknown action."}
+        "welcome": "👋 Welcome to the Multi-Pilot Flight Tracker!\n\n👨‍✈️ Pilot?\n• /register to link your Google Calendar.\n• /moncode to see your invitation code.\n• /invite to get a shareable link.\n\n👪 Family/Contact?\n• Click an invitation link or use /join CODE.\n• /vol to view the next flight.\n\n🌐 Language: /lang fr or /lang en\n\n🔵 = pilot · 🟢 = contact", "help": "Commands:\n/register — connect Google Calendar\n/moncode — show invitation code\n/invite — create an invitation link\n/join CODE — subscribe with a code\n/vol — view the next flight\n/status — show status\n/reconnect — reconnect Google\n/disconnect — disconnect Google\n/lang fr|en — change language\n/stop — unsubscribe\n/help — show this help\n\n🔵 = pilot · 🟢 = contact", "register_link": "🔗 Pilot Google Calendar connection:\n\nClick this link to authorize your calendar:\n{link}", "register_error": "❌ Error during /register: {error}", "oauth_success": "✅ Google account connected successfully!\n\nYour invitation code is: {code}\nShare this link:\n{invite}", "oauth_page": "Connection successful! You can close this window and return to Telegram.", "oauth_fail": "Authentication failed.", "lang_usage": "🌐 Usage: /lang fr or /lang en", "lang_changed": "✅ Language saved: French.", "lang_changed_en": "✅ Language saved: English.", "code": "🔑 Your invitation code is: {code}", "not_registered": "❌ You are not registered yet. Type /register first.", "invite": "🔗 Link to share with your contact:\n{link}", "invite_missing": "❌ Connect Google Calendar with /register first.", "join_usage": "⚠️ Incorrect format. Use /join CODE.", "joined": "✅ You are now linked to the pilot! Type /vol to view flights.", "invalid_code": "❌ Invalid invitation code.", "stopped": "✅ You are unsubscribed.", "not_subscribed": "ℹ️ You are not subscribed to any pilot.", "access": "🔒 Access restricted. Enter a code with /join CODE.", "searching": "🔍 Looking for the next flight…", "no_flight": "❌ No flight found in the calendar.", "flight": "✈️ Next flight:\n\n• Flight: {title}\n• Scheduled departure: {date}\n\n📡 Radar status:\n{status}\n\n🔗 Track on Flightradar24:\n{link}", "radar_ground": "On ground 🟢 | Altitude: {altitude}", "radar_air": "In flight ✈️ | Altitude: {altitude}", "radar_missing": "Aircraft not detected on radar.", "invite_config": "⚠️ BOT_USERNAME is not configured. Use /moncode.", "menu_flights": "Current flight", "menu_status": "Status", "menu_invite": "Invite", "menu_lang": "Language FR/EN", "menu_reconnect": "Reconnect Google", "menu_disconnect": "Disconnect", "status": "📊 Status\nLanguage: {lang}\nGoogle: {google}\nSubscribed contacts: {contacts}\nNext duty: {duty}\nNotifications: {notifications}", "connected": "connected", "expired": "expired", "not_connected": "not connected", "none": "none", "enabled": "enabled", "disabled": "disabled", "disconnect_confirm": "Revoke and delete your Google credentials?", "disconnect_done": "✅ Google Calendar disconnected.", "disconnect_cancel": "Disconnect cancelled.", "reconnect_hint": "🔗 Reconnect Google with /register.", "calendar_expired": "⚠️ Your Google connection expired. Reconnect to receive duties.", "notif_departure": "⏰ Reminder: flight {flight} ({iata}) scheduled at {time}.", "notif_takeoff": "🛫 Flight {flight} ({iata}) took off. ETA: {eta}.", "notif_landing": "🛬 Flight {flight} landed.", "callback_unknown": "Unknown action."}
 }
 
 def normalize_lang(value): return "fr" if str(value or "").lower().startswith("fr") else "en"
@@ -175,11 +175,35 @@ def envoyer_message_telegram(chat_id,texte,parse_mode='Markdown',reply_markup=No
     if telegram_request('sendMessage',payload): return True
     if parse_mode: payload.pop('parse_mode',None); return telegram_request('sendMessage',payload)
     return False
-def answer_callback(callback_id): telegram_request('answerCallbackQuery',{'callback_query_id':callback_id})
+def answer_callback(callback_id):
+    if callback_id: telegram_request('answerCallbackQuery', {'callback_query_id': callback_id})
 
-def main_keyboard(lang):
-    return {'inline_keyboard':[[{'text':t('menu_flights',lang),'callback_data':'vol'},{'text':t('menu_status',lang),'callback_data':'status'}],[{'text':t('menu_invite',lang),'callback_data':'invite'},{'text':t('menu_lang',lang),'callback_data':'lang'}],[{'text':t('menu_reconnect',lang),'callback_data':'reconnect'},{'text':t('menu_disconnect',lang),'callback_data':'disconnect'}]]}
-def disconnect_keyboard(lang): return {'inline_keyboard':[[{'text':t('menu_disconnect',lang),'callback_data':'disconnect_yes'},{'text':'❌' if lang=='fr' else '❌', 'callback_data':'disconnect_no'}]]}
+def _is_pilot(chat_id):
+    """Return whether chat_id owns a pilot record (used only for button labels)."""
+    with db_connect() as c:
+        return c.execute('SELECT 1 FROM pilotes WHERE chat_id=?', (chat_id,)).fetchone() is not None
+
+def main_keyboard(lang, chat_id=None):
+    # Telegram has no native button colours: emojis provide a consistent visual
+    # cue while callback_data remains stable and is audited by traiter_callback.
+    pilot = _is_pilot(chat_id) if chat_id is not None else False
+    blue = '🔵 '
+    green = '🟢 '
+    accent = blue if pilot else green
+    return {'inline_keyboard':[
+        [{'text':accent+t('menu_flights',lang),'callback_data':'vol'},
+         {'text':accent+t('menu_status',lang),'callback_data':'status'}],
+        [{'text':blue+t('menu_invite',lang),'callback_data':'invite'},
+         {'text':accent+t('menu_lang',lang),'callback_data':'lang'}],
+        [{'text':blue+t('menu_reconnect',lang),'callback_data':'reconnect'},
+         {'text':'🔴 '+t('menu_disconnect',lang),'callback_data':'disconnect'}]
+    ]}
+
+def disconnect_keyboard(lang):
+    return {'inline_keyboard':[[
+        {'text':'🔴 '+t('menu_disconnect',lang),'callback_data':'disconnect_yes'},
+        {'text':'❌', 'callback_data':'disconnect_no'}
+    ]]}
 
 def obtenir_token(chat_id):
     with db_connect() as c: row=c.execute('SELECT google_token FROM pilotes WHERE chat_id=?',(chat_id,)).fetchone()
@@ -213,44 +237,12 @@ def texte_evenement(event): return '\n'.join(str(event.get(c,'') or '') for c in
 CODES_IATA_EXCLUS={'OFF','DAY','SIM','STB','REC','LAT','VOL','REST','RDO','DUT','DUTY','TRAIN','TRNG','FORM','MCC','LIF','LEAVE','CONG','SICK','VAC','BRF','BRIE','MEET','REP','POS','HOTEL','HOME','BASE','CREW','FLT','FDP','EFB','TBD'}
 # Codes ICAO (3 letters) accepted as a fallback for airlines whose calendar
 # entries use the ICAO designator instead of the 2-character IATA designator.
-# Codes ICAO de compagnies acceptés lorsqu'un agenda utilise le
-# désignateur à 3 lettres plutôt que le code IATA à 2 caractères. Cette
-# liste est volontairement large et facilement extensible.
-CODES_ICAO_COMPAGNIES_BASE={
-    # Cargo / express
-    'ABW','ABX','ATN','BOX','CAO','CKS','CLX','DHK','DHL','FDX','GEC','GTI',
-    'KZR','MPH','NCA','PAC','SQC','TAY','UPS',
-    # Passenger and cargo airlines (common ICAO designators)
-    'AAL','AAR','ACA','ACI','ADR','AEA','AEE','AFL','AFR','AHY','AIC','ALK',
-    'AMX','ANA','ANZ','APW','ASA','ASH','ASL','AUA','AVA','AXM','AZA','BAW',
-    'BCS','BEL','BER','BGA','BKP','BMA','BTA','BTI','CAL','CCA','CCM','CES',
-    'CFG','CHH','CLH','CMP','CPA','CRK','CSN','CTN','CXA','DAL','DAT','DLH',
-    'DTA','EIN','ELY','EMB','ENY','ESY','ETD','ETH','EVA','EZS','EZY','FIN',
-    'FJI','FJO','GLO','GLO','GWI','HDA','HKE','IBE','ICE','IGO','JAL','JBU',
-    'JST','KAL','KLM','LBT','LOT','LUV','MAU','MEA','MON','MSR','NAX','NOK',
-    'NOK','OAL','OMA','PAL','PGT','PIA','QFA','QTR','RAM','RJA','ROT','RYR',
-    'SAA','SAS','SBI','SCX','SEH','SIA','SVA','SWR','TAP','TAR','TAY','THA',
-    'THY','TRA','TVF','UAE','UAL','VIR','VLG','VOI','WJA','WZZ','XQY',
-}
-# Optional operator-specific additions, for example EXTRA_AIRLINE_CODES=ABC,XYZ.
-EXTRA_AIRLINE_CODES={
-    code.strip().upper()
-    for code in os.environ.get('EXTRA_AIRLINE_CODES', '').split(',')
-    if re.fullmatch(r'[A-Z]{3}', code.strip(), re.IGNORECASE)
-}
-CODES_ICAO_COMPAGNIES=CODES_ICAO_COMPAGNIES_BASE | EXTRA_AIRLINE_CODES
-# A flight prefix is either two alphanumeric characters containing at least
-# one letter (3V, U2, 5X, 6E, AF, ...) or a whitelisted 3-letter ICAO code.
-# Boundaries prevent accepting TXB235/ABC123 through a 2-character substring.
-_PREFIX_2_ALNUM=r'(?=[A-Z0-9]{0,1}[A-Z])[A-Z0-9]{2}'
-_PREFIX_3_ICAO=r'(?:' + '|'.join(sorted(CODES_ICAO_COMPAGNIES, reverse=True)) + r')'
-REGEX_NUMERO_VOL=re.compile(
-    r'(?<![A-Z0-9])(' + _PREFIX_3_ICAO + r'|' + _PREFIX_2_ALNUM +
-    r')[- ]?(\d{1,4})(?![A-Z0-9])',
-    re.IGNORECASE,
-)
-REGEX_CODE_IATA=re.compile(r'(?<![A-Z])([A-Z]{3})(?![A-Z])')
-
+CODES_ICAO_COMPAGNIES={'AFR','AIC','AUA','BAW','BER','CFG','CLH','DLH','EZY','FIN','KLM','QFA','QTR','RYR','SAS','SWR','THY','UAE','VIR','WZZ'}
+# A flight number is an IATA airline designator (2 alphanumeric characters),
+# or one of the explicitly known 3-letter ICAO designators above, followed by
+# 1 to 4 digits.  Both sides are bounded so TXB235 cannot be reduced to a
+# substring such as XB235, and arbitrary 3-letter codes are rejected below.
+REGEX_NUMERO_VOL=re.compile(r'(?<![A-Z0-9])((?:' + '|'.join(sorted(CODES_ICAO_COMPAGNIES, key=len, reverse=True)) + r'|[A-Z][A-Z0-9]))[- ]?(\d{1,4})(?![A-Z0-9])', re.IGNORECASE); REGEX_CODE_IATA=re.compile(r'(?<![A-Z])([A-Z]{3})(?![A-Z])')
 def extraire_numero_vol(text):
     for m in REGEX_NUMERO_VOL.finditer(text or ''):
         code=m.group(1).upper()
@@ -361,12 +353,12 @@ def traiter_callback(query):
     cid=query.get('message',{}).get('chat',{}).get('id'); data=query.get('data',''); answer_callback(query.get('id'))
     if cid is None:return
     lang=get_language(cid)
-    if data=='lang': set_language(cid,'en' if lang=='fr' else 'fr'); envoyer_message_telegram(cid,t('lang_changed_en' if lang=='fr' else 'lang_changed','en' if lang=='fr' else 'fr'),reply_markup=main_keyboard('en' if lang=='fr' else 'fr')); return
-    if data=='status': envoyer_message_telegram(cid,status_text(cid),reply_markup=main_keyboard(lang)); return
+    if data=='lang': set_language(cid,'en' if lang=='fr' else 'fr'); envoyer_message_telegram(cid,t('lang_changed_en' if lang=='fr' else 'lang_changed','en' if lang=='fr' else 'fr'),reply_markup=main_keyboard('en' if lang=='fr' else 'fr', cid)); return
+    if data=='status': envoyer_message_telegram(cid,status_text(cid),reply_markup=main_keyboard(lang, cid)); return
     if data=='reconnect': traiter_commande_register(cid); return
     if data=='disconnect': envoyer_message_telegram(cid,t('disconnect_confirm',lang),reply_markup=disconnect_keyboard(lang)); return
-    if data=='disconnect_yes': disconnect_google(cid); envoyer_message_telegram(cid,t('disconnect_done',lang),reply_markup=main_keyboard(lang)); return
-    if data=='disconnect_no': envoyer_message_telegram(cid,t('disconnect_cancel',lang),reply_markup=main_keyboard(lang)); return
+    if data=='disconnect_yes': disconnect_google(cid); envoyer_message_telegram(cid,t('disconnect_done',lang),reply_markup=main_keyboard(lang, cid)); return
+    if data=='disconnect_no': envoyer_message_telegram(cid,t('disconnect_cancel',lang),reply_markup=main_keyboard(lang, cid)); return
     if data=='invite':
         with db_connect() as c: row=c.execute('SELECT code_invitation FROM pilotes WHERE chat_id=?',(cid,)).fetchone()
         envoyer_message_telegram(cid,t('invite',lang,link=invitation_link(row[0])) if row and row[0] and invitation_link(row[0]) else t('invite_config',lang)); return
@@ -376,8 +368,8 @@ def traiter_callback(query):
 def traiter_message(message):
     chat_id=message['chat']['id']; texte=message.get('text','').strip(); lang=get_language(chat_id,normalize_lang(message.get('from',{}).get('language_code','en'))); set_language(chat_id,lang); command=texte.split()[0].split('@',1)[0].lower() if texte.startswith('/') else ''
     if command=='/start':
-        code=parse_start_payload(texte); envoyer_message_telegram(chat_id,t('joined' if code and rattacher_proche(chat_id,code) else ('invalid_code' if code else 'welcome'),lang),reply_markup=main_keyboard(lang)); return
-    if command in ('/help',): envoyer_message_telegram(chat_id,t('help',lang),reply_markup=main_keyboard(lang)); return
+        code=parse_start_payload(texte); envoyer_message_telegram(chat_id,t('joined' if code and rattacher_proche(chat_id,code) else ('invalid_code' if code else 'welcome'),lang),reply_markup=main_keyboard(lang, chat_id)); return
+    if command in ('/help',): envoyer_message_telegram(chat_id,t('help',lang),reply_markup=main_keyboard(lang, chat_id)); return
     if command=='/lang':
         arg=texte.split()[1].lower() if len(texte.split())>1 else ''; envoyer_message_telegram(chat_id,t('lang_usage',lang) if arg not in ('fr','en') else t('lang_changed' if arg=='fr' else 'lang_changed_en',arg));
         if arg in ('fr','en'):set_language(chat_id,arg)
@@ -393,7 +385,7 @@ def traiter_message(message):
         with db_connect() as c: deleted=c.execute('DELETE FROM proches WHERE chat_id=?',(chat_id,)).rowcount
         envoyer_message_telegram(chat_id,t('stopped' if deleted else 'not_subscribed',lang)); return
     if command=='/disconnect': envoyer_message_telegram(chat_id,t('disconnect_confirm',lang),reply_markup=disconnect_keyboard(lang)); return
-    if command=='/status': envoyer_message_telegram(chat_id,status_text(chat_id),reply_markup=main_keyboard(lang)); return
+    if command=='/status': envoyer_message_telegram(chat_id,status_text(chat_id),reply_markup=main_keyboard(lang, chat_id)); return
     if command=='/vol':
         target=cible_vol(chat_id)
         if not target: envoyer_message_telegram(chat_id,t('access',lang)); return
