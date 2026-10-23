@@ -213,12 +213,44 @@ def texte_evenement(event): return '\n'.join(str(event.get(c,'') or '') for c in
 CODES_IATA_EXCLUS={'OFF','DAY','SIM','STB','REC','LAT','VOL','REST','RDO','DUT','DUTY','TRAIN','TRNG','FORM','MCC','LIF','LEAVE','CONG','SICK','VAC','BRF','BRIE','MEET','REP','POS','HOTEL','HOME','BASE','CREW','FLT','FDP','EFB','TBD'}
 # Codes ICAO (3 letters) accepted as a fallback for airlines whose calendar
 # entries use the ICAO designator instead of the 2-character IATA designator.
-CODES_ICAO_COMPAGNIES={'AFR','AIC','AUA','BAW','BER','CFG','CLH','DLH','EZY','FIN','KLM','QFA','QTR','RYR','SAS','SWR','THY','UAE','VIR','WZZ'}
-# A flight number is an IATA airline designator (2 alphanumeric characters),
-# or one of the explicitly known 3-letter ICAO designators above, followed by
-# 1 to 4 digits.  Both sides are bounded so TXB235 cannot be reduced to a
-# substring such as XB235, and arbitrary 3-letter codes are rejected below.
-REGEX_NUMERO_VOL=re.compile(r'(?<![A-Z0-9])((?:' + '|'.join(sorted(CODES_ICAO_COMPAGNIES, key=len, reverse=True)) + r'|[A-Z][A-Z0-9]))[- ]?(\d{1,4})(?![A-Z0-9])', re.IGNORECASE); REGEX_CODE_IATA=re.compile(r'(?<![A-Z])([A-Z]{3})(?![A-Z])')
+# Codes ICAO de compagnies acceptés lorsqu'un agenda utilise le
+# désignateur à 3 lettres plutôt que le code IATA à 2 caractères. Cette
+# liste est volontairement large et facilement extensible.
+CODES_ICAO_COMPAGNIES_BASE={
+    # Cargo / express
+    'ABW','ABX','ATN','BOX','CAO','CKS','CLX','DHK','DHL','FDX','GEC','GTI',
+    'KZR','MPH','NCA','PAC','SQC','TAY','UPS',
+    # Passenger and cargo airlines (common ICAO designators)
+    'AAL','AAR','ACA','ACI','ADR','AEA','AEE','AFL','AFR','AHY','AIC','ALK',
+    'AMX','ANA','ANZ','APW','ASA','ASH','ASL','AUA','AVA','AXM','AZA','BAW',
+    'BCS','BEL','BER','BGA','BKP','BMA','BTA','BTI','CAL','CCA','CCM','CES',
+    'CFG','CHH','CLH','CMP','CPA','CRK','CSN','CTN','CXA','DAL','DAT','DLH',
+    'DTA','EIN','ELY','EMB','ENY','ESY','ETD','ETH','EVA','EZS','EZY','FIN',
+    'FJI','FJO','GLO','GLO','GWI','HDA','HKE','IBE','ICE','IGO','JAL','JBU',
+    'JST','KAL','KLM','LBT','LOT','LUV','MAU','MEA','MON','MSR','NAX','NOK',
+    'NOK','OAL','OMA','PAL','PGT','PIA','QFA','QTR','RAM','RJA','ROT','RYR',
+    'SAA','SAS','SBI','SCX','SEH','SIA','SVA','SWR','TAP','TAR','TAY','THA',
+    'THY','TRA','TVF','UAE','UAL','VIR','VLG','VOI','WJA','WZZ','XQY',
+}
+# Optional operator-specific additions, for example EXTRA_AIRLINE_CODES=ABC,XYZ.
+EXTRA_AIRLINE_CODES={
+    code.strip().upper()
+    for code in os.environ.get('EXTRA_AIRLINE_CODES', '').split(',')
+    if re.fullmatch(r'[A-Z]{3}', code.strip(), re.IGNORECASE)
+}
+CODES_ICAO_COMPAGNIES=CODES_ICAO_COMPAGNIES_BASE | EXTRA_AIRLINE_CODES
+# A flight prefix is either two alphanumeric characters containing at least
+# one letter (3V, U2, 5X, 6E, AF, ...) or a whitelisted 3-letter ICAO code.
+# Boundaries prevent accepting TXB235/ABC123 through a 2-character substring.
+_PREFIX_2_ALNUM=r'(?=[A-Z0-9]{0,1}[A-Z])[A-Z0-9]{2}'
+_PREFIX_3_ICAO=r'(?:' + '|'.join(sorted(CODES_ICAO_COMPAGNIES, reverse=True)) + r')'
+REGEX_NUMERO_VOL=re.compile(
+    r'(?<![A-Z0-9])(' + _PREFIX_3_ICAO + r'|' + _PREFIX_2_ALNUM +
+    r')[- ]?(\d{1,4})(?![A-Z0-9])',
+    re.IGNORECASE,
+)
+REGEX_CODE_IATA=re.compile(r'(?<![A-Z])([A-Z]{3})(?![A-Z])')
+
 def extraire_numero_vol(text):
     for m in REGEX_NUMERO_VOL.finditer(text or ''):
         code=m.group(1).upper()
