@@ -852,6 +852,28 @@ def cycle_notifications():
 # ---------------------------------------------------------------------------
 # BOUCLE PRINCIPALE DU BOT TELEGRAM (commandes + callback_query)
 # ---------------------------------------------------------------------------
+# --- LISTE DES HANDLERS (pour logging au démarrage) ---
+HANDLERS_COMMANDS = [
+    "/start", "/help", "/register", "/moncode", "/invite",
+    "/join", "/stop", "/desabonner", "/vol", "/status",
+]
+HANDLERS_CALLBACKS = [
+    "stop:<pilote_id>", "stop:cancel",
+]
+
+
+def _log_exception(context, exc):
+    """Centralise le log des exceptions (équivalent error_handler)."""
+    import traceback as _tb
+    print(f"[bot_vol][ERROR] {context}: {type(exc).__name__}: {exc}")
+    _tb.print_exc()
+
+
+def error_handler(context, exception):
+    """Error_handler global — journalise toute exception non rattrapée."""
+    _log_exception(context, exception)
+
+
 def _traiter_callback_query(query):
     """Traite les callback_query Telegram (réponse aux boutons inline)."""
     cb_id = query.get("id")
@@ -862,44 +884,63 @@ def _traiter_callback_query(query):
         else None
     )
     # Acquittement (obligatoire pour faire disparaître le sablier).
+    # Toujours appelé en premier, même si data est inconnu.
     try:
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
             json={"callback_query_id": cb_id},
             timeout=5,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        _log_exception("callback.answer", e)
 
     if not chat_id:
         return
 
-    if data.startswith("stop:"):
-        payload = data.split(":", 1)[1]
-        if payload == "cancel":
-            envoyer_message_telegram(chat_id, "❌ Désabonnement annulé.")
-            return
-        try:
-            pilote_id = int(payload)
-        except ValueError:
-            return
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute(
-            'DELETE FROM proches WHERE chat_id = ? AND pilote_chat_id = ?',
-            (chat_id, pilote_id),
-        )
-        deleted = c.rowcount
-        conn.commit()
-        conn.close()
-        if deleted:
-            envoyer_message_telegram(
-                chat_id, "✅ Vous êtes désabonné de ce pilote."
+    try:
+        if data.startswith("stop:"):
+            payload = data.split(":", 1)[1]
+            if payload == "cancel":
+                envoyer_message_telegram(chat_id, "❌ Désabonnement annulé.")
+                return
+            try:
+                pilote_id = int(payload)
+            except ValueError:
+                envoyer_message_telegram(
+                    chat_id, "⚠️ Bouton invalide."
+                )
+                return
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute(
+                'DELETE FROM proches WHERE chat_id = ? AND pilote_chat_id = ?',
+                (chat_id, pilote_id),
             )
+            deleted = c.rowcount
+            conn.commit()
+            conn.close()
+            if deleted:
+                envoyer_message_telegram(
+                    chat_id, "✅ Vous êtes désabonné de ce pilote."
+                )
+            else:
+                envoyer_message_telegram(
+                    chat_id, "ℹ️ Vous n'étiez pas abonné à ce pilote."
+                )
         else:
+            # Bouton inconnu → on confirme silencieusement (déjà fait via
+            # answerCallbackQuery) mais on informe l'utilisateur.
             envoyer_message_telegram(
-                chat_id, "ℹ️ Vous n'étiez pas abonné à ce pilote."
+                chat_id, "⚠️ Action inconnue."
             )
+    except Exception as e:
+        _log_exception("callback.dispatch", e)
+        try:
+            envoyer_message_telegram(
+                chat_id, "⚠️ Une erreur est survenue, réessayez."
+            )
+        except Exception:
+            pass
 
 
 def lancer_bot_interactif():
@@ -912,6 +953,20 @@ def lancer_bot_interactif():
     else:
         print("[bot_vol] ⚠️ BOT_USERNAME introuvable : "
               "liens d'invitation indisponibles.")
+
+    # --- Log de démarrage : liste explicite des handlers ---
+    print("[bot_vol] Handlers commandes : "
+          + ", ".join(HANDLERS_COMMANDS))
+    print("[bot_vol] Handlers callbacks : "
+          + ", ".join(HANDLERS_CALLBACKS))
+
+    def _safe(callable_, *args, **kwargs):
+        """Exécute un handler en isolant les exceptions."""
+        try:
+            return callable_(*args, **kwargs)
+        except Exception as e:
+            _log_exception("handler", e)
+            return None
 
     offset = 0
     while True:
