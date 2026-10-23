@@ -56,6 +56,7 @@ class _DBConnection:
             try:
                 import psycopg2
                 from psycopg2 import OperationalError
+                self._operational_error = OperationalError
             except ImportError as exc:
                 raise RuntimeError("DATABASE_URL est défini mais psycopg2-binary n'est pas installé") from exc
             last_error = None
@@ -75,9 +76,28 @@ class _DBConnection:
             sql += " ON CONFLICT (chat_id, event_id, notification_type) DO NOTHING"
         return sql.replace("?", "%s")
     def execute(self, sql, params=()):
-        try: return self.conn.cursor().execute(self._sql(sql), params)
-        except Exception:
-            if self.is_postgres: self.conn.rollback()
+        # psycopg2 cursor.execute() returns None; expose the cursor so callers
+        # can immediately use fetchone(), fetchall(), iteration and rowcount
+        # with either SQLite or Postgres.
+        converted_sql = self._sql(sql)
+        try:
+            cur = self.conn.cursor()
+            cur.execute(converted_sql, params)
+            return cur
+        except Exception as exc:
+            if self.is_postgres:
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                # A Neon connection can drop between two short-lived requests.
+                # Reconnect once for connection-level failures, and return the
+                # retried cursor just like the first attempt.
+                if isinstance(exc, self._operational_error):
+                    self._connect()
+                    cur = self.conn.cursor()
+                    cur.execute(converted_sql, params)
+                    return cur
             raise
     def cursor(self): return self.conn.cursor()
     def commit(self): return self.conn.commit()
@@ -99,11 +119,11 @@ def init_db():
             conn.execute("CREATE TABLE IF NOT EXISTS proches (chat_id BIGINT PRIMARY KEY, pilote_chat_id BIGINT, FOREIGN KEY (pilote_chat_id) REFERENCES pilotes (chat_id))")
             conn.execute("CREATE TABLE IF NOT EXISTS notification_state (chat_id BIGINT, event_id TEXT, notification_type TEXT, sent_at TEXT, PRIMARY KEY(chat_id, event_id, notification_type))")
         else:
-            conn.execute('CREATE TABLE IF NOT EXISTS pilotes (chat_id INTEGER PRIMARY KEY, nom TEXT, code_invitation TEXT UNIQUE, google_token TEXT, language TEXT DEFAULT "en")')
+            conn.execute("CREATE TABLE IF NOT EXISTS pilotes (chat_id INTEGER PRIMARY KEY, nom TEXT, code_invitation TEXT UNIQUE, google_token TEXT, language TEXT DEFAULT 'en')")
             conn.execute('CREATE TABLE IF NOT EXISTS proches (chat_id INTEGER PRIMARY KEY, pilote_chat_id INTEGER, FOREIGN KEY (pilote_chat_id) REFERENCES pilotes (chat_id))')
             conn.execute('CREATE TABLE IF NOT EXISTS notification_state (chat_id INTEGER, event_id TEXT, notification_type TEXT, sent_at TEXT, PRIMARY KEY(chat_id,event_id,notification_type))')
             cols = {row[1] for row in conn.execute("PRAGMA table_info(pilotes)")}
-            if "language" not in cols: conn.execute('ALTER TABLE pilotes ADD COLUMN language TEXT DEFAULT "en"')
+            if "language" not in cols: conn.execute("ALTER TABLE pilotes ADD COLUMN language TEXT DEFAULT 'en'")
 
 init_db()
 
@@ -259,7 +279,7 @@ def notify(text_key,duty, pilot, **kwargs):
 def notification_cycle():
     while True:
         try:
-            with db_connect() as c: pilots=[r[0] for r in c.execute('SELECT chat_id FROM pilotes WHERE google_token IS NOT NULL AND google_token != ""')]
+            with db_connect() as c: pilots=[r[0] for r in c.execute("SELECT chat_id FROM pilotes WHERE google_token IS NOT NULL AND google_token != ''")]
             now=datetime.datetime.now(datetime.timezone.utc)
             for pilot in pilots:
                 for event in fetch_events(pilot):
