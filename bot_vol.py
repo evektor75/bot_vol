@@ -211,10 +211,20 @@ calendar_cache=TTLCache(CACHE_CALENDAR_TTL); opensky_cache=TTLCache(CACHE_OPENSK
 
 def texte_evenement(event): return '\n'.join(str(event.get(c,'') or '') for c in ('summary','description','location'))
 CODES_IATA_EXCLUS={'OFF','DAY','SIM','STB','REC','LAT','VOL','REST','RDO','DUT','DUTY','TRAIN','TRNG','FORM','MCC','LIF','LEAVE','CONG','SICK','VAC','BRF','BRIE','MEET','REP','POS','HOTEL','HOME','BASE','CREW','FLT','FDP','EFB','TBD'}
-REGEX_NUMERO_VOL=re.compile(r'(?<![A-Z0-9])([A-Z]{2,3})[- ]?(\d{1,4})(?!\d)'); REGEX_CODE_IATA=re.compile(r'(?<![A-Z])([A-Z]{3})(?![A-Z])')
+# Codes ICAO (3 letters) accepted as a fallback for airlines whose calendar
+# entries use the ICAO designator instead of the 2-character IATA designator.
+CODES_ICAO_COMPAGNIES={'AFR','AIC','AUA','BAW','BER','CFG','CLH','DLH','EZY','FIN','KLM','QFA','QTR','RYR','SAS','SWR','THY','UAE','VIR','WZZ'}
+# A flight number is an IATA airline designator (2 alphanumeric characters),
+# or one of the explicitly known 3-letter ICAO designators above, followed by
+# 1 to 4 digits.  Both sides are bounded so TXB235 cannot be reduced to a
+# substring such as XB235, and arbitrary 3-letter codes are rejected below.
+REGEX_NUMERO_VOL=re.compile(r'(?<![A-Z0-9])((?:' + '|'.join(sorted(CODES_ICAO_COMPAGNIES, key=len, reverse=True)) + r'|[A-Z][A-Z0-9]))[- ]?(\d{1,4})(?![A-Z0-9])', re.IGNORECASE); REGEX_CODE_IATA=re.compile(r'(?<![A-Z])([A-Z]{3})(?![A-Z])')
 def extraire_numero_vol(text):
     for m in REGEX_NUMERO_VOL.finditer(text or ''):
-        if m.group(1).upper() not in CODES_IATA_EXCLUS:return f'{m.group(1).upper()}{m.group(2)}'
+        code=m.group(1).upper()
+        if code in CODES_IATA_EXCLUS: continue
+        if len(code)==2 or code in CODES_ICAO_COMPAGNIES:
+            return f'{code}{m.group(2)}'
     return None
 def extraire_codes_iata(text): return sorted({m.group(1) for m in REGEX_CODE_IATA.finditer(text or '') if m.group(1) not in CODES_IATA_EXCLUS})
 def evenement_est_un_duty_valide(event): return bool(extraire_numero_vol(texte_evenement(event)) and len(extraire_codes_iata(texte_evenement(event)))>=2)
