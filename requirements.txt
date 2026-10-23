@@ -1,5 +1,1 @@
-requests
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
-flask
+psycopg2-binary>=2.9,<3
