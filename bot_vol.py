@@ -216,10 +216,22 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown"):
         print(f"❌ Exception envoi Telegram pour chat_id={chat_id} : {e}")
         return False
 
-
 def extraire_numero_vol(titre_event):
-    match = re.search(r'\b([A-Z0-9]{2,3}\s?\d{1,4})\b', titre_event, re.IGNORECASE)
-    return match.group(1).replace(" ", "").upper() if match else None
+    """
+    Recherche un numéro de vol (ex: AF123, DL4567) ou 
+    une immatriculation d'avion (ex: F-GABC, N12345) dans le titre.
+    """
+    # 1. Recherche d'un format Compagnie + Numéro (ex: AF1234, BA 45)
+    match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4})\b', titre_event, re.IGNORECASE)
+    if match_vol:
+        return match_vol.group(1).replace(" ", "").upper()
+        
+    # 2. Recherche d'une immatriculation d'avion (ex: F-XXXX, N12345)
+    match_immat = re.search(r'\b([A-Z]{1,2}-[A-Z0-9]{3,5})\b', titre_event, re.IGNORECASE)
+    if match_immat:
+        return match_immat.group(1).upper()
+        
+    return None
 
 
 def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
@@ -240,7 +252,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
         events_result = service.events().list(
             calendarId='primary', timeMin=now,
-            maxResults=10, singleEvents=True,
+            maxResults=20, singleEvents=True,  # On élargit un peu la recherche (20) pour trouver un vrai vol
             orderBy='startTime').execute()
         events = events_result.get('items', [])
 
@@ -248,12 +260,11 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
             titre = event.get('summary', '')
             numero_vol = extraire_numero_vol(titre)
 
-            if numero_vol or "VOL" in titre.upper() or re.search(r'\b[A-Z]{3}-[A-Z]{3}\b', titre):
+            # FILTRE STRICT : On exige qu'un numéro de vol ou une immatriculation valide soit détecté.
+            # On ignore les événements textuels sans code valide.
+            if numero_vol:
                 debut_str = event['start'].get('dateTime', event['start'].get('date'))
                 debut_dt = datetime.datetime.fromisoformat(debut_str)
-                if not numero_vol:
-                    match_fallback = re.search(r'^([A-Z0-9]+)', titre)
-                    numero_vol = match_fallback.group(1) if match_fallback else titre
 
                 return {
                     "numero": numero_vol,
@@ -264,7 +275,6 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     except Exception as e:
         print(f"❌ Erreur API Google Calendar : {e}")
         return None
-
 
 def verifier_ads_b(numero_vol):
     url = "https://opensky-network.org/api/states/all"
