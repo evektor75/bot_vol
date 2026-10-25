@@ -23,18 +23,16 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram de suivi de vols")
+print("🤖 Démarrage du bot Telegram de suivi de vols (avec Claviers & Déconnexion)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
     print("❌ ERREUR : TELEGRAM_TOKEN manquant dans l'environnement !")
-    print("   Le bot ne pourra ni lire ni envoyer de messages.")
 else:
     print(f"✅ TELEGRAM_TOKEN présent (longueur={len(TELEGRAM_TOKEN)})")
 
 if not RENDER_EXTERNAL_URL or RENDER_EXTERNAL_URL.startswith("http://localhost"):
     print(f"⚠️  ATTENTION : RENDER_EXTERNAL_URL non défini en prod → {RENDER_EXTERNAL_URL}")
-    print("   Les liens OAuth Google seront invalides hors de localhost.")
 else:
     print(f"✅ RENDER_EXTERNAL_URL = {RENDER_EXTERNAL_URL}")
 
@@ -43,11 +41,8 @@ if not CLIENT_SECRET_JSON:
 else:
     print("✅ GOOGLE_CLIENT_SECRET_JSON présent.")
 
-# --- SUPPRESSION DU WEBHOOK (évite le conflit avec le polling long) ---
+# --- SUPPRESSION DU WEBHOOK ---
 def supprimer_webhook_telegram():
-    """Supprime tout webhook éventuellement enregistré sur Telegram.
-    Indispensable quand on bascule entre webhook et long-polling,
-    sinon getUpdates renvoie une liste vide et aucun message n'est reçu."""
     if not TELEGRAM_TOKEN:
         return
     try:
@@ -57,7 +52,7 @@ def supprimer_webhook_telegram():
     except Exception as e:
         print(f"⚠️  Erreur deleteWebhook : {e}")
 
-# Initialisation de Flask (Serveur Web unique)
+# Initialisation de Flask
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super-secret-key-rafael")
 
@@ -162,7 +157,8 @@ def oauth2callback():
             chat_id,
             f"✅ **Compte Google connecté avec succès !**\n\n"
             f"Votre code d'invitation pour vos proches est : `{code_inv}`\n"
-            f"Partagez-leur ce code pour qu'ils s'abonnent avec :\n`/join {code_inv}`"
+            f"Partagez-leur ce code pour qu'ils s'abonnent !",
+            markup=generer_clavier_principal(is_pilote=True)
         )
 
         return "<h1>Connexion réussie !</h1><p>Vous pouvez fermer cette fenêtre et retourner sur Telegram.</p>"
@@ -170,19 +166,31 @@ def oauth2callback():
         return f"Erreur lors de la validation OAuth : {e}", 500
 
 # ---------------------------------------------------------------------------
-# LOGIQUE BOT TELEGRAM
+# LOGIQUE CLAVIER & BOT TELEGRAM
 # ---------------------------------------------------------------------------
-def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown"):
-    """Envoie un message Telegram.
+def generer_clavier_principal(is_pilote=False, is_proche=False):
+    """Génère un clavier dynamique selon le statut de l'utilisateur."""
+    keyboard = []
+    
+    if is_pilote:
+        keyboard.append([{"text": "✈️ Prochain Vol"}, {"text": "🔑 Mon Code Invité"}])
+        keyboard.append([{"text": "🚪 Déconnexion Pilote"}])
+    elif is_proche:
+        keyboard.append([{"text": "✈️ Prochain Vol"}])
+        keyboard.append([{"text": "🚪 Quitter le Pilote"}])
+    else:
+        # Utilisateur non enregistré
+        keyboard.append([{"text": "👨‍✈️ Enregistrer mon Agenda (Pilote)"}])
+        keyboard.append([{"text": "ℹ️ Aide"}])
 
-    - Vérifie TELEGRAM_TOKEN (sinon log + return False).
-    - Stocke la réponse HTTP, vérifie r.ok.
-    - Logue r.status_code et r.text si non-OK.
-    - En cas d'échec de parsing Markdown, RETENTE automatiquement en texte brut
-      pour ne pas perdre la réponse à cause d'un caractère spécial.
-    """
+    return {
+        "keyboard": keyboard,
+        "resize_keyboard": True,
+        "is_persistent": True
+    }
+
+def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None):
     if not TELEGRAM_TOKEN:
-        print(f"⚠️  TELEGRAM_TOKEN absent → message NON envoyé vers chat_id={chat_id}")
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -193,40 +201,30 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown"):
     }
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if markup:
+        payload["reply_markup"] = markup
 
     try:
         r = requests.post(url, json=payload, timeout=10)
         if r.ok:
             return True
 
-        # Échec : log complet
-        print(f"❌ Telegram NON-OK (status={r.status_code}) pour chat_id={chat_id} : {r.text[:300]}")
-
-        # Fallback automatique : si Telegram refuse le Markdown (status 400),
-        # on renvoie le même texte sans parse_mode (texte brut).
         if parse_mode and r.status_code == 400 and "can't parse" in r.text.lower():
             payload_plain = {k: v for k, v in payload.items() if k != "parse_mode"}
-            print(f"🔁 Fallback texte brut pour chat_id={chat_id}")
             r2 = requests.post(url, json=payload_plain, timeout=10)
             if r2.ok:
                 return True
-            print(f"❌ Fallback texte brut aussi échoué (status={r2.status_code}) : {r2.text[:300]}")
         return False
     except Exception as e:
-        print(f"❌ Exception envoi Telegram pour chat_id={chat_id} : {e}")
+        print(f"❌ Exception envoi Telegram : {e}")
         return False
 
+
 def extraire_numero_vol(titre_event):
-    """
-    Recherche un numéro de vol (ex: AF123, DL4567) ou 
-    une immatriculation d'avion (ex: F-GABC, N12345) dans le titre.
-    """
-    # 1. Recherche d'un format Compagnie + Numéro (ex: AF1234, BA 45)
     match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4})\b', titre_event, re.IGNORECASE)
     if match_vol:
         return match_vol.group(1).replace(" ", "").upper()
         
-    # 2. Recherche d'une immatriculation d'avion (ex: F-XXXX, N12345)
     match_immat = re.search(r'\b([A-Z]{1,2}-[A-Z0-9]{3,5})\b', titre_event, re.IGNORECASE)
     if match_immat:
         return match_immat.group(1).upper()
@@ -252,7 +250,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
         events_result = service.events().list(
             calendarId='primary', timeMin=now,
-            maxResults=20, singleEvents=True,  # On élargit un peu la recherche (20) pour trouver un vrai vol
+            maxResults=20, singleEvents=True,
             orderBy='startTime').execute()
         events = events_result.get('items', [])
 
@@ -260,12 +258,9 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
             titre = event.get('summary', '')
             numero_vol = extraire_numero_vol(titre)
 
-            # FILTRE STRICT : On exige qu'un numéro de vol ou une immatriculation valide soit détecté.
-            # On ignore les événements textuels sans code valide.
             if numero_vol:
                 debut_str = event['start'].get('dateTime', event['start'].get('date'))
                 debut_dt = datetime.datetime.fromisoformat(debut_str)
-
                 return {
                     "numero": numero_vol,
                     "titre": titre,
@@ -275,6 +270,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     except Exception as e:
         print(f"❌ Erreur API Google Calendar : {e}")
         return None
+
 
 def verifier_ads_b(numero_vol):
     url = "https://opensky-network.org/api/states/all"
@@ -296,16 +292,27 @@ def verifier_ads_b(numero_vol):
     return None
 
 
+def verifier_statut_utilisateur(chat_id):
+    """Détecte si l'utilisateur est pilote, proche ou inconnu."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT chat_id FROM pilotes WHERE chat_id = ?', (chat_id,))
+    is_pilote = c.fetchone() is not None
+    
+    c.execute('SELECT chat_id FROM proches WHERE chat_id = ?', (chat_id,))
+    is_proche = c.fetchone() is not None
+    conn.close()
+    return is_pilote, is_proche
+
+
 def lancer_bot_interactif():
     print("🤖 Bot Telegram Multi-utilisateurs démarré (mode polling)...")
-    supprimer_webhook_telegram()  # évite le conflit webhook ↔ polling
-
+    supprimer_webhook_telegram()
     offset = 0
 
     while True:
         try:
             if not TELEGRAM_TOKEN:
-                print("❌ TELEGRAM_TOKEN absent — bot en attente (vérifiez vos variables d'env)")
                 time.sleep(10)
                 continue
 
@@ -313,13 +320,11 @@ def lancer_bot_interactif():
             try:
                 response = requests.get(url, timeout=35)
                 data = response.json()
-            except Exception as e:
-                print(f"❌ Erreur getUpdates : {e}")
+            except Exception:
                 time.sleep(5)
                 continue
 
             if not data.get("ok"):
-                print(f"❌ getUpdates non-OK : {data}")
                 time.sleep(5)
                 continue
 
@@ -330,30 +335,25 @@ def lancer_bot_interactif():
                     chat_id = update["message"]["chat"]["id"]
                     texte = update["message"]["text"].strip()
 
-                    if texte.startswith("/start"):
-                        msg = (
-                            "👋 **Bienvenue sur le Bot de Suivi de Vol Multi-Pilotes !**\n\n"
-                            "👨‍✈️ **Vous êtes Pilote ?**\n"
-                            "• Tapez `/register` pour lier votre Google Calendar.\n"
-                            "• Tapez `/moncode` pour voir votre code d'invitation.\n\n"
-                            "👪 **Vous êtes Proche/Famille ?**\n"
-                            "• Tapez `/join CODE` pour vous abonner à un pilote (ex: `/join RAF123`).\n"
-                            "• Tapez `/vol` pour consulter le prochain vol de votre pilote !"
-                        )
-                        envoyer_message_telegram(chat_id, msg)
+                    is_pilote, is_proche = verifier_statut_utilisateur(chat_id)
 
-                    elif texte.startswith("/register") or texte.startswith("/register@"):
-                        # ===== UN SEUL ENVOI =====
-                        print(f"DEBUG: Commande /register interceptée pour chat_id={chat_id}")
+                    # --- Commandes & Boutons ---
+                    if texte.startswith("/start") or texte == "ℹ️ Aide":
+                        msg = (
+                            "👋 **Bienvenue sur le Bot de Suivi de Vol !**\n\n"
+                            "Utilisez les boutons ci-dessous pour interagir facilement."
+                        )
+                        envoyer_message_telegram(chat_id, msg, markup=generer_clavier_principal(is_pilote, is_proche))
+
+                    elif texte.startswith("/register") or texte == "👨‍✈️ Enregistrer mon Agenda (Pilote)":
                         link = f"{RENDER_EXTERNAL_URL}/login?chat_id={chat_id}"
                         message_texte = (
                             "🔗 **Connexion Pilote Google Calendar :**\n\n"
                             f"Cliquez sur ce lien pour autoriser l'accès à votre agenda :\n{link}"
                         )
                         envoyer_message_telegram(chat_id, message_texte)
-                        print(f"DEBUG: Lien /register envoyé avec succès -> {link}")
 
-                    elif texte.startswith("/moncode"):
+                    elif texte.startswith("/moncode") or texte == "🔑 Mon Code Invité":
                         conn = sqlite3.connect(DB_FILE)
                         c = conn.cursor()
                         c.execute('SELECT code_invitation FROM pilotes WHERE chat_id = ?', (chat_id,))
@@ -363,7 +363,7 @@ def lancer_bot_interactif():
                         if row and row[0]:
                             envoyer_message_telegram(chat_id, f"🔑 Votre code d'invitation proche est : `{row[0]}`")
                         else:
-                            envoyer_message_telegram(chat_id, "❌ Vous n'êtes pas encore enregistré. Tapez `/register` d'abord.")
+                            envoyer_message_telegram(chat_id, "❌ Vous n'êtes pas enregistré comme pilote.")
 
                     elif texte.startswith("/join"):
                         parts = texte.split()
@@ -386,12 +386,19 @@ def lancer_bot_interactif():
                             ''', (chat_id, pilote_id))
                             conn.commit()
                             conn.close()
-                            envoyer_message_telegram(chat_id, "✅ Vous êtes rattaché au pilote ! Tapez `/vol` pour voir les vols.")
+                            
+                            # Actualisation des statuts pour afficher le bon clavier
+                            _, is_proche_new = verifier_statut_utilisateur(chat_id)
+                            envoyer_message_telegram(
+                                chat_id, 
+                                "✅ Vous êtes rattaché au pilote avec succès !", 
+                                markup=generer_clavier_principal(is_pilote=False, is_proche=True)
+                            )
                         else:
                             conn.close()
                             envoyer_message_telegram(chat_id, "❌ Code d'invitation invalide.")
 
-                    elif texte.startswith("/vol"):
+                    elif texte.startswith("/vol") or texte == "✈️ Prochain Vol":
                         conn = sqlite3.connect(DB_FILE)
                         c = conn.cursor()
                         c.execute('SELECT pilote_chat_id FROM proches WHERE chat_id = ?', (chat_id,))
@@ -411,28 +418,43 @@ def lancer_bot_interactif():
                             envoyer_message_telegram(
                                 chat_id,
                                 "🔒 **Accès restreint.**\n"
-                                "Entrez le code d'invitation d'un pilote avec `/join CODE` pour accéder à ses vols."
+                                "Veuillez enregistrer votre agenda de pilote ou utiliser `/join CODE` pour suivre un pilote."
                             )
                             continue
 
-                        envoyer_message_telegram(chat_id, "🔍 Recherche du prochain vol...")
+                        envoyer_message_telegram(chat_id, "🔍 Recherche du prochain vol filtré...")
                         vol = obtenir_prochain_vol_pour_pilote(pilote_target_id)
 
                         if not vol:
-                            envoyer_message_telegram(chat_id, "❌ Aucun vol trouvé dans l'agenda.")
+                            envoyer_message_telegram(chat_id, "❌ Aucun vol valide (numéro de vol ou immatriculation) trouvé dans l'agenda.")
                         else:
                             live = verifier_ads_b(vol['numero'])
                             statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar."
                             link_fr24 = f"https://www.flightradar24.com/data/flights/{vol['numero']}"
 
                             reponse = (
-                                f"✈️ **Prochain vol :**\n\n"
-                                f"• **Vol :** {vol['titre']}\n"
+                                f"✈️ **Prochain vol trouvé :**\n\n"
+                                f"• **Titre :** {vol['titre']}\n"
+                                f"• **Vol identifié :** `{vol['numero']}`\n"
                                 f"• **Départ prévu :** {vol['debut_dt'].strftime('%d/%m/%Y à %H:%M')}\n\n"
                                 f"📡 **Statut radar :**\n{statut_live}\n\n"
                                 f"🔗 [Suivre sur Flightradar24]({link_fr24})"
                             )
                             envoyer_message_telegram(chat_id, reponse)
+
+                    elif texte in ["🚪 Déconnexion Pilote", "🚪 Quitter le Pilote", "/logout"]:
+                        conn = sqlite3.connect(DB_FILE)
+                        c = conn.cursor()
+                        c.execute('DELETE FROM pilotes WHERE chat_id = ?', (chat_id,))
+                        c.execute('DELETE FROM proches WHERE chat_id = ?', (chat_id,))
+                        conn.commit()
+                        conn.close()
+
+                        envoyer_message_telegram(
+                            chat_id,
+                            "🔒 **Déconnexion effectuée.** Vos données de liaison ont été supprimées de ce bot.",
+                            markup=generer_clavier_principal(is_pilote=False, is_proche=False)
+                        )
 
         except Exception as e:
             print(f"❌ Erreur boucle bot : {e}")
@@ -440,7 +462,7 @@ def lancer_bot_interactif():
         time.sleep(2)
 
 
-# Lancement global propre (Bot en arrière-plan + Flask au premier plan)
+# Lancement global propre
 if __name__ == '__main__':
     threading.Thread(target=lancer_bot_interactif, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
