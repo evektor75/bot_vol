@@ -12,6 +12,7 @@ from flask import Flask, request, redirect, url_for
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
 # --- CONFIGURATION SÉCURISÉE ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -110,7 +111,8 @@ def login():
     flow = Flow.from_client_config(
         client_config,
         scopes=SCOPES,
-        redirect_uri=redirect_uri
+        redirect_uri=redirect_uri,
+        autogenerate_code_verifier=False
     )
 
     auth_url, state = flow.authorization_url(
@@ -135,7 +137,8 @@ def oauth2callback():
         flow = Flow.from_client_config(
             client_config,
             scopes=SCOPES,
-            redirect_uri=redirect_uri
+            redirect_uri=redirect_uri,
+            autogenerate_code_verifier=False
         )
         flow.fetch_token(code=code)
         credentials = flow.credentials
