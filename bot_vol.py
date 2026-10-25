@@ -23,7 +23,7 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram de suivi de vols (avec Claviers & Déconnexion)")
+print("🤖 Démarrage du bot Telegram (Mode Automatique & Claviers)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -77,6 +77,14 @@ def init_db():
             chat_id INTEGER PRIMARY KEY,
             pilote_chat_id INTEGER,
             FOREIGN KEY (pilote_chat_id) REFERENCES pilotes (chat_id)
+        )
+    ''')
+    # Table pour stocker le dernier état connu des vols surveillés (évite les doublons d'alertes)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS suivi_vols (
+            pilote_chat_id INTEGER PRIMARY KEY,
+            numero_vol TEXT,
+            dernier_etat TEXT
         )
     ''')
     conn.commit()
@@ -169,9 +177,7 @@ def oauth2callback():
 # LOGIQUE CLAVIER & BOT TELEGRAM
 # ---------------------------------------------------------------------------
 def generer_clavier_principal(is_pilote=False, is_proche=False):
-    """Génère un clavier dynamique selon le statut de l'utilisateur."""
     keyboard = []
-    
     if is_pilote:
         keyboard.append([{"text": "✈️ Prochain Vol"}, {"text": "🔑 Mon Code Invité"}])
         keyboard.append([{"text": "🚪 Déconnexion Pilote"}])
@@ -179,7 +185,6 @@ def generer_clavier_principal(is_pilote=False, is_proche=False):
         keyboard.append([{"text": "✈️ Prochain Vol"}])
         keyboard.append([{"text": "🚪 Quitter le Pilote"}])
     else:
-        # Utilisateur non enregistré
         keyboard.append([{"text": "👨‍✈️ Enregistrer mon Agenda (Pilote)"}])
         keyboard.append([{"text": "ℹ️ Aide"}])
 
@@ -284,6 +289,7 @@ def verifier_ads_b(numero_vol):
                     on_ground = state[8]
                     alt_ft = int(state[7] * 3.28084) if state[7] is not None else 0
                     return {
+                        "etat_brut": on_ground,  # True = au sol, False = en vol
                         "etat": "Au sol 🟢" if on_ground else "En vol ✈️",
                         "altitude": f"{alt_ft} ft"
                     }
@@ -293,7 +299,6 @@ def verifier_ads_b(numero_vol):
 
 
 def verifier_statut_utilisateur(chat_id):
-    """Détecte si l'utilisateur est pilote, proche ou inconnu."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('SELECT chat_id FROM pilotes WHERE chat_id = ?', (chat_id,))
@@ -305,6 +310,98 @@ def verifier_statut_utilisateur(chat_id):
     return is_pilote, is_proche
 
 
+# ---------------------------------------------------------------------------
+# TÂCHE DE FOND AUTOMATIQUE (SURVEILLANCE DES VOLS)
+# ---------------------------------------------------------------------------
+def background_flight_monitor():
+    """Vérifie périodiquement les vols de tous les pilotes et alerte en cas de décollage/atterrissage."""
+    print("🛰️ Thread de surveillance automatique des vols démarré.")
+    while True:
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute('SELECT chat_id FROM pilotes')
+            pilotes = c.fetchall()
+            conn.close()
+
+            for (pilote_chat_id,) in pilotes:
+                vol = obtenir_prochain_vol_pour_pilote(pilote_chat_id)
+                if not vol:
+                    continue
+
+                # On vérifie si le vol est prévu dans les prochaines heures ou en cours (par ex. début < 6h dans le futur ou déjà commencé)
+                maintenant = datetime.datetime.now(datetime.timezone.utc)
+                # Assurons-nous que debut_dt est timezone-aware
+                debut_dt = vol['debut_dt']
+                if debut_dt.tzinfo is None:
+                    debut_dt = debut_dt.replace(tzinfo=datetime.timezone.utc)
+
+                delta_heures = (debut_dt - maintenant).total_seconds() / 3600
+
+                # Si le vol est dans moins de 4 heures ou a commencé il y a moins de 12 heures
+                if -12 <= delta_heures <= 4:
+                    radar = verifier_ads_b(vol['numero'])
+                    if not radar:
+                        continue
+
+                    etat_actuel = "AU_SOL" if radar['etat_brut'] else "EN_VOL"
+
+                    # Récupérer l'ancien état stocké
+                    conn = sqlite3.connect(DB_FILE)
+                    c = conn.cursor()
+                    c.execute('SELECT numero_vol, dernier_etat FROM suivi_vols WHERE pilote_chat_id = ?', (pilote_chat_id,))
+                    row_suivi = c.fetchone()
+                    
+                    ancien_vol = row_suivi[0] if row_suivi else None
+                    ancien_etat = row_suivi[1] if row_suivi else None
+
+                    # Si c'est un nouveau vol ou si l'état a changé (ex: AU_SOL -> EN_VOL)
+                    if ancien_vol != vol['numero'] or ancien_etat != etat_actuel:
+                        # Mettre à jour la base
+                        c.execute('''
+                            INSERT INTO suivi_vols (pilote_chat_id, numero_vol, dernier_etat)
+                            VALUES (?, ?, ?)
+                            ON CONFLICT(pilote_chat_id) DO UPDATE SET numero_vol = excluded.numero_vol, dernier_etat = excluded.dernier_etat
+                        ''', (pilote_chat_id, vol['numero'], etat_actuel))
+                        conn.commit()
+
+                        # Préparer le message d'alerte automatique
+                        if ancien_etat == "AU_SOL" and etat_actuel == "EN_VOL":
+                            texte_alerte = f"🛫 **ALERTE DÉCOLLAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient de décoller !\nAltitude : {radar['altitude']}"
+                        elif ancien_etat == "EN_VOL" and etat_actuel == "AU_SOL":
+                            texte_alerte = f"🛬 **ALERTE ATTERRISSAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient d'atterrir."
+                        else:
+                            # Premier repérage du vol
+                            texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est actuellement **{radar['etat']}** ({radar['altitude']})."
+
+                        # Trouver tous les destinataires (le pilote + ses proches abonnés)
+                        destinataires = [pilote_chat_id]
+                        c.execute('SELECT chat_id FROM proches WHERE pilote_chat_id = ?', (pilote_chat_id,))
+                        proches = c.fetchall()
+                        for (proche_chat_id,) in proches:
+                            destinataires.append(proche_chat_id)
+                        
+                        conn.close()
+
+                        # Envoyer l'alerte à tout ce monde
+                        link_fr24 = f"https://www.flightradar24.com/data/flights/{vol['numero']}"
+                        message_final = f"{texte_alerte}\n\n🔗 [Suivre sur Flightradar24]({link_fr24})"
+
+                        for dest_id in destinataires:
+                            envoyer_message_telegram(dest_id, message_final)
+                    else:
+                        conn.close()
+
+        except Exception as e:
+            print(f"❌ Erreur dans le thread de surveillance : {e}")
+
+        # Vérification toutes les 3 minutes (180 secondes) pour ne pas saturer l'API OpenSky
+        time.sleep(180)
+
+
+# ---------------------------------------------------------------------------
+# LOGIQUE BOT TELEGRAM (POLLING)
+# ---------------------------------------------------------------------------
 def lancer_bot_interactif():
     print("🤖 Bot Telegram Multi-utilisateurs démarré (mode polling)...")
     supprimer_webhook_telegram()
@@ -337,11 +434,11 @@ def lancer_bot_interactif():
 
                     is_pilote, is_proche = verifier_statut_utilisateur(chat_id)
 
-                    # --- Commandes & Boutons ---
                     if texte.startswith("/start") or texte == "ℹ️ Aide":
                         msg = (
-                            "👋 **Bienvenue sur le Bot de Suivi de Vol !**\n\n"
-                            "Utilisez les boutons ci-dessous pour interagir facilement."
+                            "👋 **Bienvenue sur le Bot de Suivi de Vol Automatique !**\n\n"
+                            "Ce bot prévient automatiquement les proches lors des décollages et atterrissages.\n"
+                            "Utilisez les boutons ci-dessous :"
                         )
                         envoyer_message_telegram(chat_id, msg, markup=generer_clavier_principal(is_pilote, is_proche))
 
@@ -387,11 +484,9 @@ def lancer_bot_interactif():
                             conn.commit()
                             conn.close()
                             
-                            # Actualisation des statuts pour afficher le bon clavier
-                            _, is_proche_new = verifier_statut_utilisateur(chat_id)
                             envoyer_message_telegram(
                                 chat_id, 
-                                "✅ Vous êtes rattaché au pilote avec succès !", 
+                                "✅ Vous êtes rattaché au pilote ! Vous recevrez désormais les alertes automatiques de vol.", 
                                 markup=generer_clavier_principal(is_pilote=False, is_proche=True)
                             )
                         else:
@@ -426,7 +521,7 @@ def lancer_bot_interactif():
                         vol = obtenir_prochain_vol_pour_pilote(pilote_target_id)
 
                         if not vol:
-                            envoyer_message_telegram(chat_id, "❌ Aucun vol valide (numéro de vol ou immatriculation) trouvé dans l'agenda.")
+                            envoyer_message_telegram(chat_id, "❌ Aucun vol valide trouvé dans l'agenda.")
                         else:
                             live = verifier_ads_b(vol['numero'])
                             statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar."
@@ -447,12 +542,13 @@ def lancer_bot_interactif():
                         c = conn.cursor()
                         c.execute('DELETE FROM pilotes WHERE chat_id = ?', (chat_id,))
                         c.execute('DELETE FROM proches WHERE chat_id = ?', (chat_id,))
+                        c.execute('DELETE FROM suivi_vols WHERE pilote_chat_id = ?', (chat_id,))
                         conn.commit()
                         conn.close()
 
                         envoyer_message_telegram(
                             chat_id,
-                            "🔒 **Déconnexion effectuée.** Vos données de liaison ont été supprimées de ce bot.",
+                            "🔒 **Déconnexion effectuée.** Vos données et abonnements ont été supprimés.",
                             markup=generer_clavier_principal(is_pilote=False, is_proche=False)
                         )
 
@@ -462,8 +558,9 @@ def lancer_bot_interactif():
         time.sleep(2)
 
 
-# Lancement global propre
+# Lancement global propre (Flask + Bot Polling + Surveillance Automatique)
 if __name__ == '__main__':
     threading.Thread(target=lancer_bot_interactif, daemon=True).start()
+    threading.Thread(target=background_flight_monitor, daemon=True).start() # Thread automatique
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
