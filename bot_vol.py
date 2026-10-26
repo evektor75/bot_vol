@@ -51,7 +51,7 @@ def nom_aeroport(code_iata):
 
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (OpenSky optimisé + JSON Aéroports)")
+print("🤖 Démarrage du bot Telegram (OpenSky sécurisé + JSON Aéroports)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -251,10 +251,6 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None)
 
 
 def extraire_infos_vol(titre_event):
-    """
-    Extrait le numéro de vol, l'aéroport de départ et d'arrivée du titre eCrew.
-    Exemple de titre : "3V4717 - EDI (2011) - MME (2100)" ou "3V4717  EDI-MME"
-    """
     if not titre_event:
         return None, None, None
 
@@ -287,7 +283,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
         events_result = service.events().list(
             calendarId='primary', timeMin=now,
-            maxResults=20, singleEvents=True,
+            maxResults=10, singleEvents=True,
             orderBy='startTime').execute()
         events = events_result.get('items', [])
 
@@ -312,11 +308,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
 
 def verifier_ads_b(numero_vol, dep=None):
-    """
-    Interroge OpenSky Network avec un timeout optimisé (6s) pour éviter les blocages.
-    """
     url = "https://opensky-network.org/api/states/all"
-    
     candidats = [numero_vol.strip().upper()]
     correspondance_oaci = {
         "3V": "TAY",
@@ -337,7 +329,7 @@ def verifier_ads_b(numero_vol, dep=None):
             candidats.append(vol_oaci)
 
     try:
-        response = requests.get(url, timeout=6)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             states = response.json().get("states", [])
             for state in states:
@@ -571,21 +563,25 @@ def lancer_bot_interactif():
                             )
                             continue
 
-                        envoyer_message_telegram(chat_id, "🔍 Recherche du prochain vol filtré...")
+                        # 1. On prévient immédiatement l'utilisateur pour éviter l'effet "bot figé"
+                        envoyer_message_telegram(chat_id, "🔍 Recherche du prochain vol dans l'agenda...")
                         vol = obtenir_prochain_vol_pour_pilote(pilote_target_id)
 
                         if not vol:
                             envoyer_message_telegram(chat_id, "❌ Aucun vol valide trouvé dans l'agenda.")
                         else:
+                            # 2. On envoie un message intermédiaire avant d'interroger OpenSky (qui peut prendre quelques secondes)
+                            envoyer_message_telegram(chat_id, f"✈️ Vol trouvé : `{vol['numero']}` ({nom_aeroport(vol['dep'])} ➔ {nom_aeroport(vol['arr'])}).\n📡 Interrogation du radar en cours...")
+
                             live = verifier_ads_b(vol['numero'], vol['dep'])
-                            statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar."
+                            statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar (au sol ou non couvert)."
                             link_fr24 = f"https://www.flightradar24.com/data/flights/{vol['numero']}"
 
                             dep_nom = nom_aeroport(vol['dep'])
                             arr_nom = nom_aeroport(vol['arr'])
 
                             reponse = (
-                                f"✈️ **Prochain vol trouvé :**\n\n"
+                                f"📋 **Détails du vol :**\n\n"
                                 f"• **Vol :** `{vol['numero']}`\n"
                                 f"• **Départ :** {dep_nom} (`{vol['dep']}`)\n"
                                 f"• **Destination :** {arr_nom} (`{vol['arr']}`)\n"
