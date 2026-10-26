@@ -51,7 +51,7 @@ def nom_aeroport(code_iata):
 
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (OpenSky + Préfixe OACI + Aéroports JSON)")
+print("🤖 Démarrage du bot Telegram (Zone Europe/Moyen-Orient optimisée)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -251,10 +251,6 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None)
 
 
 def extraire_infos_vol(titre_event):
-    """
-    Extrait le numéro de vol et les codes aéroports IATA depuis le titre eCrew.
-    Exemple de titre : "3V4717 - EDI (2011) - MME (2100)" ou "3V4717 EDI-MME"
-    """
     if not titre_event:
         return None, None, None
 
@@ -313,14 +309,22 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
 def verifier_ads_b(numero_vol, dep=None):
     """
-    Interroge OpenSky Network et convertit les préfixes IATA (ex: 3V) en OACI (ex: TAY)
-    pour retrouver efficacement l'indicatif radar (Callsign).
+    Interroge OpenSky en ciblant précisément la zone Europe / Méditerranée / Moyen-Orient 
+    (de Casablanca à Tel-Aviv, du Nord de l'Europe jusqu'aux Canaries).
+    Convertit automatiquement les préfixes IATA (ex: 3V) en OACI (ex: TAY).
     """
     url = "https://opensky-network.org/api/states/all"
     
+    # Bounding Box optimisée pour votre zone de vol (Europe / Maroc / Israël)
+    # [lamin, lomin, lamax, lomax] -> Sud, Ouest, Nord, Est
+    params = {
+        "lamin": 27.0,  # Sud (Maroc / Canaries)
+        "lomin": -18.0, # Ouest (Atlantique / Casablanca)
+        "lamax": 65.0,  # Nord (Scandinavie / Royaume-Uni)
+        "lomax": 36.0   # Est (Tel-Aviv / Moyen-Orient)
+    }
+
     candidats = [numero_vol.strip().upper()]
-    
-    # Dictionnaire de correspondance IATA -> OACI pour les compagnies aériennes
     correspondance_oaci = {
         "3V": "TAY",
         "FR": "RYR",
@@ -340,10 +344,10 @@ def verifier_ads_b(numero_vol, dep=None):
             candidats.append(vol_oaci) # ex: TAY4717
 
     try:
-        response = requests.get(url, timeout=6)
+        response = requests.get(url, params=params, timeout=5)
         if response.status_code == 200:
             states = response.json().get("states", [])
-            print(f"🔍 [OpenSky] {len(states)} aéronefs reçus. Filtrage avec candidats : {candidats}")
+            print(f"🔍 [OpenSky Zone Europe] {len(states)} aéronefs reçus. Filtrage avec candidats : {candidats}")
 
             for state in states:
                 callsign = state[1]
@@ -359,7 +363,7 @@ def verifier_ads_b(numero_vol, dep=None):
                                 "etat": "Au sol 🟢" if on_ground else "En vol ✈️",
                                 "altitude": f"{alt_ft} ft"
                             }
-            print(f"❌ [OpenSky] Aucun vol correspondant trouvé pour {candidats}.")
+            print(f"❌ [OpenSky Zone Europe] Aucun vol correspondant trouvé pour {candidats}.")
     except Exception as e:
         print(f"⚠️ Erreur requête OpenSky : {e}")
     return None
@@ -378,7 +382,7 @@ def verifier_statut_utilisateur(chat_id):
 
 
 # ---------------------------------------------------------------------------
-# TÂCHE DE FOND AUTOMATIQUE (AVEC FENÊTRE DE TOLÉRANCE -1h / +1h)
+# TÂCHE DE FOND AUTOMATIQUE
 # ---------------------------------------------------------------------------
 def background_flight_monitor():
     print("🛰️ Thread de surveillance automatique des vols démarré.")
@@ -402,8 +406,8 @@ def background_flight_monitor():
 
                 delta_heures = (debut_dt - maintenant).total_seconds() / 3600
 
-                # Fenêtre de suivi de -12h à +12h autour du vol (gère retards et avances)
-                if -1 <= delta_heures <= 1:
+                # Fenêtre de tolérance de -12h à +12h pour gérer les retards et avances
+                if -12 <= delta_heures <= 12:
                     radar = verifier_ads_b(vol['numero'], vol['dep'])
                     if not radar:
                         continue
@@ -581,29 +585,36 @@ def lancer_bot_interactif():
                             )
                             continue
 
-                        envoyer_message_telegram(chat_id, "🔍 Recherche du prochain vol et interrogation du radar...")
+                        # 1. RETOUR IMMÉDIAT DES INFOS DE L'AGENDA
+                        envoyer_message_telegram(chat_id, "🔍 Recherche du prochain vol dans l'agenda...")
                         vol = obtenir_prochain_vol_pour_pilote(pilote_target_id)
 
                         if not vol:
                             envoyer_message_telegram(chat_id, "❌ Aucun vol valide trouvé dans l'agenda.")
                         else:
-                            live = verifier_ads_b(vol['numero'], vol['dep'])
-                            statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar (au sol ou non couvert)."
-                            link_fr24 = f"https://www.flightradar24.com/data/flights/{vol['numero']}"
-
                             dep_nom = nom_aeroport(vol['dep'])
                             arr_nom = nom_aeroport(vol['arr'])
 
-                            reponse = (
-                                f"✈️ **Prochain vol trouvé :**\n\n"
-                                f"• **Vol :** `{vol['numero']}`\n"
-                                f"• **Départ :** {dep_nom} (`{vol['dep']}`)\n"
-                                f"• **Destination :** {arr_nom} (`{vol['arr']}`)\n"
-                                f"• **Prévu le :** {vol['debut_dt'].strftime('%d/%m/%Y à %H:%M')}\n\n"
-                                f"📡 **Statut radar :**\n{statut_live}\n\n"
+                            # Message intermédiaire instantané pour rassurer l'utilisateur
+                            envoyer_message_telegram(
+                                chat_id, 
+                                f"✈️ **Vol trouvé :** `{vol['numero']}`\n"
+                                f"• Départ : {dep_nom} (`{vol['dep']}`)\n"
+                                f"• Destination : {arr_nom} (`{vol['arr']}`)\n"
+                                f"• Prévu le : {vol['debut_dt'].strftime('%d/%m/%Y à %H:%M')}\n\n"
+                                f"📡 *Interrogation du radar européen en cours...*"
+                            )
+
+                            # 2. RECHERCHE SUR LA ZONE EUROPE / MEDITERRANEE
+                            live = verifier_ads_b(vol['numero'], vol['dep'])
+                            statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar (au sol ou hors zone)."
+                            link_fr24 = f"https://www.flightradar24.com/data/flights/{vol['numero']}"
+
+                            reponse_finale = (
+                                f"📡 **Statut radar (Zone Europe / Proche-Orient) :**\n{statut_live}\n\n"
                                 f"🔗 [Suivre sur Flightradar24]({link_fr24})"
                             )
-                            envoyer_message_telegram(chat_id, reponse)
+                            envoyer_message_telegram(chat_id, reponse_finale)
 
                     elif texte in ["🚪 Déconnexion Pilote", "🚪 Quitter le Pilote", "/logout"]:
                         conn = sqlite3.connect(DB_FILE)
