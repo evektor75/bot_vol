@@ -261,6 +261,7 @@ def extraire_infos_vol(titre_event):
 
 
 def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
+    print(f"📅 [Calendar] Récupération du token pour le pilote {pilote_chat_id}...")
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('SELECT google_token FROM pilotes WHERE chat_id = ?', (pilote_chat_id,))
@@ -268,19 +269,28 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     conn.close()
 
     if not row or not row[0]:
+        print("❌ [Calendar] Aucun token Google trouvé en base pour ce pilote.")
         return None
 
     try:
+        print("📅 [Calendar] Chargement des credentials Google...")
         cred_dict = json.loads(row[0])
         creds = Credentials.from_authorized_user_info(cred_dict, SCOPES)
+        
+        print("📅 [Calendar] Construction du service Google Calendar...")
         service = build('calendar', 'v3', credentials=creds)
-        now = datetime.datetime.utcnow().isoformat() + 'Z'
+        
+        # Correction du warning utcnow() en datetime timezone-aware
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+        print("📅 [Calendar] Interrogation de l'API Google Calendar (list events)...")
         events_result = service.events().list(
             calendarId='primary', timeMin=now,
             maxResults=20, singleEvents=True,
             orderBy='startTime').execute()
+        
         events = events_result.get('items', [])
+        print(f"📅 [Calendar] Succès ! {len(events)} événements récupérés.")
 
         for event in events:
             titre = event.get('summary', '')
@@ -289,6 +299,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
             if numero_vol:
                 debut_str = event['start'].get('dateTime', event['start'].get('date'))
                 debut_dt = datetime.datetime.fromisoformat(debut_str)
+                print(f"✅ [Calendar] Vol valide détecté dans l'agenda : {numero_vol} ({dep} -> {arr})")
                 return {
                     "numero": numero_vol,
                     "dep": dep,
@@ -296,11 +307,11 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
                     "titre": titre,
                     "debut_dt": debut_dt
                 }
+        print("❌ [Calendar] Aucun événement contenant un numéro de vol n'a été trouvé.")
         return None
     except Exception as e:
-        print(f"❌ Erreur API Google Calendar : {e}")
+        print(f"❌ Erreur critique API Google Calendar : {e}")
         return None
-
 
 def verifier_ads_b(numero_vol, dep=None):
     # Utilisation de l'endpoint '/flight' (au singulier) pour chercher par numéro IATA
