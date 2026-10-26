@@ -23,7 +23,7 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (Mode Diagnostic ADS-B)")
+print("🤖 Démarrage du bot Telegram (Mode Intelligent AF/AFR)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -225,7 +225,7 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None)
 
 
 def extraire_numero_vol(titre_event):
-    match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4})\b', titre_event, re.IGNORECASE)
+    match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)\b', titre_event, re.IGNORECASE)
     if match_vol:
         return match_vol.group(1).replace(" ", "").upper()
         
@@ -278,28 +278,34 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
 def verifier_ads_b(numero_vol):
     url = "https://opensky-network.org/api/states/all"
+    
+    # Générer des variantes de recherche intelligentes (ex: AF344 -> AFR344, AFR344P, etc.)
+    candidats = [numero_vol.strip().upper()]
+    if numero_vol.upper().startswith("AF"):
+        candidats.append(numero_vol.upper().replace("AF", "AFR", 1))
+        
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             states = response.json().get("states", [])
-            print(f"🔍 [OpenSky] {len(states)} aéronefs reçus au total sur le radar.")
-            
-            # Afficher quelques callsigns pour diagnostic dans les logs Render
-            echantillon = [s[1].strip() for s in states[:10] if s[1]]
-            print(f"🔍 [OpenSky] Échantillon de callsigns vus : {echantillon}")
+            print(f"🔍 [OpenSky] {len(states)} aéronefs reçus. Recherche parmi les candidats : {candidats}")
 
             for state in states:
                 callsign = state[1]
-                if callsign and numero_vol.strip().upper() in callsign.strip().upper():
-                    on_ground = state[8]
-                    alt_ft = int(state[7] * 3.28084) if state[7] is not None else 0
-                    print(f"🎯 [TROUVÉ] Vol {numero_vol} matché avec le callsign OpenSky : '{callsign.strip()}' | Au sol: {on_ground}")
-                    return {
-                        "etat_brut": on_ground,
-                        "etat": "Au sol 🟢" if on_ground else "En vol ✈️",
-                        "altitude": f"{alt_ft} ft"
-                    }
-            print(f"❌ [OpenSky] Vol recherché '{numero_vol}' INTROUVABLE dans la liste globale.")
+                if callsign:
+                    callsign_clean = callsign.strip().upper()
+                    for cand in candidats:
+                        # Si le callsign contient le candidat (ex: AFR344P contient AFR344 ou AF344)
+                        if cand in callsign_clean:
+                            on_ground = state[8]
+                            alt_ft = int(state[7] * 3.28084) if state[7] is not None else 0
+                            print(f"🎯 [TROUVÉ] Vol {numero_vol} matché avec le callsign OpenSky : '{callsign_clean}' | Au sol: {on_ground}")
+                            return {
+                                "etat_brut": on_ground,
+                                "etat": "Au sol 🟢" if on_ground else "En vol ✈️",
+                                "altitude": f"{alt_ft} ft"
+                            }
+            print(f"❌ [OpenSky] Aucun candidat {candidats} trouvé dans la liste globale.")
     except Exception as e:
         print(f"⚠️ Erreur requête OpenSky : {e}")
     return None
@@ -318,10 +324,10 @@ def verifier_statut_utilisateur(chat_id):
 
 
 # ---------------------------------------------------------------------------
-# TÂCHE DE FOND AUTOMATIQUE (AVEC DIAGNOSTIC)
+# TÂCHE DE FOND AUTOMATIQUE
 # ---------------------------------------------------------------------------
 def background_flight_monitor():
-    print("🛰️ Thread de surveillance automatique des vols (Mode Diagnostic) démarré.")
+    print("🛰️ Thread de surveillance automatique des vols démarré.")
     while True:
         try:
             conn = sqlite3.connect(DB_FILE)
@@ -333,10 +339,7 @@ def background_flight_monitor():
             for (pilote_chat_id,) in pilotes:
                 vol = obtenir_prochain_vol_pour_pilote(pilote_chat_id)
                 if not vol:
-                    print("🛰️ [Monitor] Aucun vol trouvé dans l'agenda du pilote.")
                     continue
-
-                print(f"🛰️ [Monitor] Vol trouvé dans l'agenda : {vol['titre']} (Extrait: {vol['numero']})")
 
                 maintenant = datetime.datetime.now(datetime.timezone.utc)
                 debut_dt = vol['debut_dt']
@@ -344,7 +347,6 @@ def background_flight_monitor():
                     debut_dt = debut_dt.replace(tzinfo=datetime.timezone.utc)
 
                 delta_heures = (debut_dt - maintenant).total_seconds() / 3600
-                print(f"🛰️ [Monitor] Delta temps par rapport au début du vol : {delta_heures:.2f} heures.")
 
                 if -12 <= delta_heures <= 12:
                     radar = verifier_ads_b(vol['numero'])
@@ -396,8 +398,6 @@ def background_flight_monitor():
                             envoyer_message_telegram(dest_id, message_final)
                     else:
                         conn.close()
-                else:
-                    print(f"🛰️ [Monitor] Vol hors de la fenêtre temporelle de surveillance (-12h/+12h).")
 
         except Exception as e:
             print(f"❌ Erreur dans le thread de surveillance : {e}")
