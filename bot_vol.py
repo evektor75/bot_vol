@@ -252,27 +252,21 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None)
 
 def extraire_infos_vol(titre_event, description_event=""):
     """
-    Extraction hyper permissive pour capturer n'importe quel vol eCrew (ex: 3V4717  EDI-MME)
+    Extraction simple et directe : le premier élément est le vol, 
+    les deux codes de 3 lettres suivants sont le départ et l'arrivée.
     """
     if not titre_event:
         return None, None, None, None, None
 
-    titre_clean = re.sub(r'\s+', ' ', titre_event).strip()
+    parts = titre_event.split()
+    numero_vol = parts[0].upper() if len(parts) > 0 else None
 
-    # 1. Recherche du numéro de vol
-    match_vol = re.search(r'([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)', titre_clean, re.IGNORECASE)
-    numero_vol = match_vol.group(1).replace(" ", "").upper() if match_vol else None
-    
-    if not numero_vol:
-        mots = titre_clean.split()
-        numero_vol = mots[0].upper() if mots else "3V4717"
+    # Extraction des codes IATA du titre
+    matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_event)
+    dep_iata = matches_iata[0] if len(matches_iata) > 0 else None
+    arr_iata = matches_iata[1] if len(matches_iata) > 1 else None
 
-    # 2. Recherche des codes aéroports IATA dans le titre
-    matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_clean)
-    dep_iata = matches_iata[0] if len(matches_iata) > 0 else "EDI"
-    arr_iata = matches_iata[1] if len(matches_iata) > 1 else "MME"
-
-    # 3. Recherche des horaires dans la description
+    # Horaires dans la description
     dep_time, arr_time = None, None
     if description_event:
         matches_time = re.findall(r'\b(\d{2}:?\d{2})\b', description_event)
@@ -299,26 +293,22 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
         creds = Credentials.from_authorized_user_info(cred_dict, SCOPES)
         service = build('calendar', 'v3', credentials=creds)
         
-        # On interroge sans filtre temporel restrictif pour être sûr de récupérer les événements du jour/à venir
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         events_result = service.events().list(
             calendarId='primary', timeMin=now,
-            maxResults=10, singleEvents=True,
+            maxResults=15, singleEvents=True,
             orderBy='startTime').execute()
         events = events_result.get('items', [])
 
-        print(f"🔎 {len(events)} événement(s) récupéré(s) depuis l'agenda Google.")
+        print(f"🔎 {len(events)} événement(s) trouvé(s) dans l'agenda.")
 
         for event in events:
             titre = event.get('summary', '')
             description = event.get('description', '')
             
-            print(f"📅 Événement scanné -> Titre: '{titre}'")
-
             numero_vol, dep_iata, dep_time, arr_iata, arr_time = extraire_infos_vol(titre, description)
 
             if numero_vol:
-                print(f"✅ Vol validé : {numero_vol} ({dep_iata} -> {arr_iata})")
                 debut_str = event['start'].get('dateTime', event['start'].get('date'))
                 debut_dt = datetime.datetime.fromisoformat(debut_str)
                 return {
@@ -332,26 +322,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
                     "titre": titre,
                     "debut_dt": debut_dt
                 }
-                
-        # S'il n'y a rien avec timeMin, on essaie sans filtre de date pour ne rien rater
-        events_result_all = service.events().list(
-            calendarId='primary', maxResults=10, singleEvents=True, orderBy='startTime').execute()
-        events_all = events_result_all.get('items', [])
-        
-        for event in events_all:
-            titre = event.get('summary', '')
-            description = event.get('description', '')
-            numero_vol, dep_iata, dep_time, arr_iata, arr_time = extraire_infos_vol(titre, description)
-            if numero_vol:
-                debut_str = event['start'].get('dateTime', event['start'].get('date'))
-                debut_dt = datetime.datetime.fromisoformat(debut_str)
-                return {
-                    "numero": numero_vol, "dep_iata": dep_iata, "dep_nom": nom_aeroport(dep_iata),
-                    "dep_time": dep_time, "arr_iata": arr_iata, "arr_nom": nom_aeroport(arr_iata),
-                    "arr_time": arr_time, "titre": titre, "debut_dt": debut_dt
-                }
-
-        print("❌ Aucun événement trouvé dans l'agenda.")
+        print("❌ Aucun vol trouvé.")
         return None
     except Exception as e:
         print(f"❌ Erreur API Google Calendar : {e}")
