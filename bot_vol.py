@@ -18,43 +18,13 @@ os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CLIENT_SECRET_JSON = os.environ.get("GOOGLE_CLIENT_SECRET_JSON")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
-AIRLABS_API_KEY = os.environ.get("AIRLABS_API_KEY")
+AIRLABS_API_KEY = "15c858b9-979c-459e-b701-3a153a54f1ce"
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
-# --- CHARGEMENT DU FICHIER JSON DES AÉROPORTS ---
-AEROPORTS_IATA = {}
-JSON_FILE_PATH = "aeroports.json"
-
-if os.path.exists(JSON_FILE_PATH):
-    try:
-        with open(JSON_FILE_PATH, "r", encoding="utf-8") as f:
-            AEROPORTS_IATA = json.load(f)
-        print(f"✅ Fichier {JSON_FILE_PATH} chargé avec succès ({len(AEROPORTS_IATA)} aéroports).")
-    except Exception as e:
-        print(f"⚠️ Erreur lors de la lecture de {JSON_FILE_PATH} : {e}")
-else:
-    print(f"⚠️ Fichier {JSON_FILE_PATH} introuvable. Utilisation d'un dictionnaire de secours.")
-    AEROPORTS_IATA = {
-        "EDI": "Édimbourg",
-        "MME": "Teesside",
-        "CDG": "Paris CDG",
-        "ORY": "Paris Orly",
-        "LGG": "Liège",
-        "BRU": "Bruxelles",
-        "FRA": "Francfort",
-        "TLV": "Tel-Aviv",
-        "CMN": "Casablanca"
-    }
-
-def nom_aeroport(code_iata):
-    if not code_iata:
-        return "Inconnu"
-    return AEROPORTS_IATA.get(code_iata.upper(), f"{code_iata.upper()}")
-
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (AirLabs + Aéroports en clair)")
+print("🤖 Démarrage du bot Telegram (Mode AirLabs + Google Calendar)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -62,11 +32,17 @@ if not TELEGRAM_TOKEN:
 else:
     print(f"✅ TELEGRAM_TOKEN présent (longueur={len(TELEGRAM_TOKEN)})")
 
-if not AIRLABS_API_KEY:
-    print("⚠️  ATTENTION : AIRLABS_API_KEY manquant dans l'environnement !")
+if not RENDER_EXTERNAL_URL or RENDER_EXTERNAL_URL.startswith("http://localhost"):
+    print(f"⚠️  ATTENTION : RENDER_EXTERNAL_URL non défini en prod → {RENDER_EXTERNAL_URL}")
 else:
-    print("✅ AIRLABS_API_KEY présent.")
+    print(f"✅ RENDER_EXTERNAL_URL = {RENDER_EXTERNAL_URL}")
 
+if not CLIENT_SECRET_JSON:
+    print("⚠️  ATTENTION : GOOGLE_CLIENT_SECRET_JSON manquant → OAuth Google désactivé.")
+else:
+    print("✅ GOOGLE_CLIENT_SECRET_JSON présent.")
+
+# --- SUPPRESSION DU WEBHOOK ---
 def supprimer_webhook_telegram():
     if not TELEGRAM_TOKEN:
         return
@@ -261,7 +237,6 @@ def extraire_infos_vol(titre_event):
 
 
 def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
-    print(f"📅 [Calendar] Récupération du token pour le pilote {pilote_chat_id}...")
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('SELECT google_token FROM pilotes WHERE chat_id = ?', (pilote_chat_id,))
@@ -269,28 +244,19 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     conn.close()
 
     if not row or not row[0]:
-        print("❌ [Calendar] Aucun token Google trouvé en base pour ce pilote.")
         return None
 
     try:
-        print("📅 [Calendar] Chargement des credentials Google...")
         cred_dict = json.loads(row[0])
         creds = Credentials.from_authorized_user_info(cred_dict, SCOPES)
-        
-        print("📅 [Calendar] Construction du service Google Calendar...")
         service = build('calendar', 'v3', credentials=creds)
-        
-        # Correction du warning utcnow() en datetime timezone-aware
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.utcnow().isoformat() + 'Z'
 
-        print("📅 [Calendar] Interrogation de l'API Google Calendar (list events)...")
         events_result = service.events().list(
             calendarId='primary', timeMin=now,
             maxResults=20, singleEvents=True,
             orderBy='startTime').execute()
-        
         events = events_result.get('items', [])
-        print(f"📅 [Calendar] Succès ! {len(events)} événements récupérés.")
 
         for event in events:
             titre = event.get('summary', '')
@@ -299,7 +265,6 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
             if numero_vol:
                 debut_str = event['start'].get('dateTime', event['start'].get('date'))
                 debut_dt = datetime.datetime.fromisoformat(debut_str)
-                print(f"✅ [Calendar] Vol valide détecté dans l'agenda : {numero_vol} ({dep} -> {arr})")
                 return {
                     "numero": numero_vol,
                     "dep": dep,
@@ -307,15 +272,18 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
                     "titre": titre,
                     "debut_dt": debut_dt
                 }
-        print("❌ [Calendar] Aucun événement contenant un numéro de vol n'a été trouvé.")
         return None
     except Exception as e:
-        print(f"❌ Erreur critique API Google Calendar : {e}")
+        print(f"❌ Erreur API Google Calendar : {e}")
         return None
 
+
 def verifier_ads_b(numero_vol, dep=None):
-    # Utilisation de l'endpoint '/flight' (au singulier) pour chercher par numéro IATA
-    url = "https://airlabs.co/api/v9/flight"
+    """
+    Interroge l'API AirLabs pour récupérer directement le statut du vol par son numéro (ex: 3V4717).
+    Retourne l'état, l'altitude et l'indicatif réel s'il est en vol.
+    """
+    url = "https://airlabs.co/api/v9/flights"
     params = {
         "api_key": AIRLABS_API_KEY,
         "flight_iata": numero_vol.strip().upper()
@@ -325,30 +293,35 @@ def verifier_ads_b(numero_vol, dep=None):
         response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            flight = data.get("response", {})
-            
-            if flight:
-                print(f"🔍 [AirLabs] Vol trouvé pour {numero_vol} : statut = {flight.get('status')}")
-                
-                # AirLabs renvoie le statut (ex: 'scheduled', 'en-route', 'landed', etc.)
-                statut = flight.get("status", "scheduled")
+            flights = data.get("response", [])
+            print(f"🔍 [AirLabs] Requête pour {numero_vol} -> {len(flights)} résultat(s) trouvé(s).")
+
+            if flights:
+                flight = flights[0]
+                is_ground = flight.get("is_ground", 0)
                 alt_m = flight.get("alt", 0)
                 alt_ft = int(alt_m * 3.28084) if alt_m is not None else 0
-                
-                # Si le statut est en-route, l'avion est en vol
-                en_vol = (statut == "en-route")
+                callsign = flight.get("reg", "Inconnu") # ou flight.get("flight_icao")
+
+                # Si is_ground est 0 ou False, l'avion est en vol
+                etat_brut = True if is_ground == 1 else False
                 
                 return {
-                    "etat_brut": not en_vol, # True si au sol, False si en vol
-                    "etat": "En vol ✈️" if en_vol else "Au sol 🟢",
+                    "etat_brut": etat_brut,
+                    "etat": "Au sol 🟢" if etat_brut else "En vol ✈️",
                     "altitude": f"{alt_ft} ft"
                 }
             else:
-                print(f"⚠️ [AirLabs] Aucun détail retourné pour le vol {numero_vol}.")
+                # Aucun vol actif en cours dans AirLabs (probablement au parking / pas encore parti)
+                return {
+                    "etat_brut": True,
+                    "etat": "Au sol 🟢 (ou non démarré)",
+                    "altitude": "0 ft"
+                }
     except Exception as e:
         print(f"⚠️ Erreur requête AirLabs : {e}")
-    
     return None
+
 
 def verifier_statut_utilisateur(chat_id):
     conn = sqlite3.connect(DB_FILE)
@@ -412,18 +385,15 @@ def background_flight_monitor():
                         ''', (pilote_chat_id, vol['numero'], etat_actuel))
                         conn.commit()
 
-                        dep_clair = nom_aeroport(vol['dep'])
-                        arr_clair = nom_aeroport(vol['arr'])
-
                         if ancien_etat == "AU_SOL" and etat_actuel == "EN_VOL":
-                            texte_alerte = f"🛫 **ALERTE DÉCOLLAGE !**\n\nLe vol `{vol['numero']}` ({dep_clair} ➔ {arr_clair}) vient de décoller !\nAltitude : {radar['altitude']}"
+                            texte_alerte = f"🛫 **ALERTE DÉCOLLAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient de décoller !\nAltitude : {radar['altitude']}"
                         elif ancien_etat == "EN_VOL" and etat_actuel == "AU_SOL":
-                            texte_alerte = f"🛬 **ALERTE ATTERRISSAGE !**\n\nLe vol `{vol['numero']}` ({dep_clair} ➔ {arr_clair}) vient d'atterrir à **{arr_clair}**."
+                            texte_alerte = f"🛬 **ALERTE ATTERRISSAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient d'atterrir."
                         else:
                             if etat_actuel == "EN_VOL":
-                                texte_alerte = f"🛫 **ALERTE EN VOL !**\n\nLe vol `{vol['numero']}` vers **{arr_clair}** est détecté en vol !\nAltitude : {radar['altitude']}"
+                                texte_alerte = f"🛫 **ALERTE EN VOL !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est détecté en vol !\nAltitude : {radar['altitude']}"
                             else:
-                                texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` ({dep_clair} ➔ {arr_clair}) est actuellement **{radar['etat']}**."
+                                texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est actuellement **{radar['etat']}**."
 
                         destinataires = [pilote_chat_id]
                         c.execute('SELECT chat_id FROM proches WHERE pilote_chat_id = ?', (pilote_chat_id,))
@@ -571,19 +541,16 @@ def lancer_bot_interactif():
                         if not vol:
                             envoyer_message_telegram(chat_id, "❌ Aucun vol valide trouvé dans l'agenda.")
                         else:
-                            dep_nom = nom_aeroport(vol['dep'])
-                            arr_nom = nom_aeroport(vol['arr'])
-
                             live = verifier_ads_b(vol['numero'], vol['dep'])
                             statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar."
                             link_fr24 = f"https://www.flightradar24.com/data/flights/{vol['numero']}"
 
                             reponse = (
                                 f"✈️ **Prochain vol trouvé :**\n\n"
-                                f"• **Vol :** `{vol['numero']}`\n"
-                                f"• **Départ :** {dep_nom} (`{vol['dep']}`)\n"
-                                f"• **Destination :** {arr_nom} (`{vol['arr']}`)\n"
-                                f"• **Prévu le :** {vol['debut_dt'].strftime('%d/%m/%Y à %H:%M')}\n\n"
+                                f"• **Titre :** {vol['titre']}\n"
+                                f"• **Vol identifié :** `{vol['numero']}`\n"
+                                f"• **Trajet :** {vol['dep']} ➔ {vol['arr']}\n"
+                                f"• **Départ prévu :** {vol['debut_dt'].strftime('%d/%m/%Y à %H:%M')}\n\n"
                                 f"📡 **Statut AirLabs :**\n{statut_live}\n\n"
                                 f"🔗 [Suivre sur Flightradar24]({link_fr24})"
                             )
