@@ -303,7 +303,8 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
 
 def verifier_ads_b(numero_vol, dep=None):
-    url = "https://airlabs.co/api/v9/flights"
+    # Utilisation de l'endpoint '/flight' (au singulier) pour chercher par numéro IATA
+    url = "https://airlabs.co/api/v9/flight"
     params = {
         "api_key": AIRLABS_API_KEY,
         "flight_iata": numero_vol.strip().upper()
@@ -313,32 +314,30 @@ def verifier_ads_b(numero_vol, dep=None):
         response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            flights = data.get("response", [])
-            print(f"🔍 [AirLabs] Requête pour {numero_vol} -> {len(flights)} résultat(s) trouvé(s).")
-
-            if flights:
-                flight = flights[0]
-                is_ground = flight.get("is_ground", 0)
+            flight = data.get("response", {})
+            
+            if flight:
+                print(f"🔍 [AirLabs] Vol trouvé pour {numero_vol} : statut = {flight.get('status')}")
+                
+                # AirLabs renvoie le statut (ex: 'scheduled', 'en-route', 'landed', etc.)
+                statut = flight.get("status", "scheduled")
                 alt_m = flight.get("alt", 0)
                 alt_ft = int(alt_m * 3.28084) if alt_m is not None else 0
-
-                etat_brut = True if is_ground == 1 else False
+                
+                # Si le statut est en-route, l'avion est en vol
+                en_vol = (statut == "en-route")
                 
                 return {
-                    "etat_brut": etat_brut,
-                    "etat": "Au sol 🟢" if etat_brut else "En vol ✈️",
+                    "etat_brut": not en_vol, # True si au sol, False si en vol
+                    "etat": "En vol ✈️" if en_vol else "Au sol 🟢",
                     "altitude": f"{alt_ft} ft"
                 }
             else:
-                return {
-                    "etat_brut": True,
-                    "etat": "Au sol 🟢 (ou non démarré)",
-                    "altitude": "0 ft"
-                }
+                print(f"⚠️ [AirLabs] Aucun détail retourné pour le vol {numero_vol}.")
     except Exception as e:
         print(f"⚠️ Erreur requête AirLabs : {e}")
+    
     return None
-
 
 def verifier_statut_utilisateur(chat_id):
     conn = sqlite3.connect(DB_FILE)
