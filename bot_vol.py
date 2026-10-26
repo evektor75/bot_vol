@@ -21,37 +21,9 @@ RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
-# --- CHARGEMENT DU FICHIER JSON DES AÉROPORTS ---
-AEROPORTS_IATA = {}
-JSON_FILE_PATH = "aeroports.json"
-
-if os.path.exists(JSON_FILE_PATH):
-    try:
-        with open(JSON_FILE_PATH, "r", encoding="utf-8") as f:
-            AEROPORTS_IATA = json.load(f)
-        print(f"✅ Fichier {JSON_FILE_PATH} chargé avec succès ({len(AEROPORTS_IATA)} aéroports).")
-    except Exception as e:
-        print(f"⚠️ Erreur lors de la lecture de {JSON_FILE_PATH} : {e}")
-else:
-    print(f"⚠️ Fichier {JSON_FILE_PATH} introuvable. Utilisation du dictionnaire de secours par défaut.")
-    AEROPORTS_IATA = {
-        "EDI": "Édimbourg (Écosse)",
-        "MME": "Teesside / Middlesbrough (UK)",
-        "CDG": "Paris Charles de Gaulle (France)",
-        "ORY": "Paris Orly (France)",
-        "LGG": "Liège (Belgique)",
-        "BRU": "Bruxelles (Belgique)",
-        "FRA": "Francfort (Allemagne)"
-    }
-
-def nom_aeroport(code_iata):
-    if not code_iata:
-        return "Inconnu"
-    return AEROPORTS_IATA.get(code_iata.upper(), f"{code_iata.upper()}")
-
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (OpenSky + JSON Aéroports & ETA)")
+print("🤖 Démarrage du bot Telegram (Mode Autonome OpenSky + Aéroports/Préfixe)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -69,6 +41,7 @@ if not CLIENT_SECRET_JSON:
 else:
     print("✅ GOOGLE_CLIENT_SECRET_JSON présent.")
 
+# --- SUPPRESSION DU WEBHOOK ---
 def supprimer_webhook_telegram():
     if not TELEGRAM_TOKEN:
         return
@@ -79,6 +52,7 @@ def supprimer_webhook_telegram():
     except Exception as e:
         print(f"⚠️  Erreur deleteWebhook : {e}")
 
+# Initialisation de Flask
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super-secret-key-rafael")
 
@@ -250,37 +224,21 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None)
         return False
 
 
-def extraire_infos_vol(titre_event, description_event=""):
+def extraire_infos_vol(titre_event):
     """
-    Extraction directe basée sur le format eCrew :
-    Titre type '3V4717  EDI-MME' -> Numéro de vol + Départ + Arrivée.
-    Description -> Horaires UTC.
+    Extrait le numéro de vol, l'aéroport de départ et d'arrivée du titre eCrew.
+    Exemple de titre : "3V4717 - EDI (2011) - MME (2100)"
     """
-    if not titre_event:
-        return None, None, None, None, None
+    match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)\b', titre_event, re.IGNORECASE)
+    numero_vol = match_vol.group(1).replace(" ", "").upper() if match_vol else None
 
-    # Nettoyage des espaces multiples
-    titre_clean = re.sub(r'\s+', ' ', titre_event).strip()
+    # Extraction des aéroports (ex: - EDI (...) - MME (...))
+    aeroports = re.findall(r'\b([A-Z]{3})\b', titre_event)
+    dep = aeroports[0] if len(aeroports) > 0 else None
+    arr = aeroports[1] if len(aeroports) > 1 else None
 
-    # 1. Extraction du numéro de vol (ex: 3V4717)
-    parts = titre_clean.split()
-    numero_vol = parts[0].upper() if len(parts) > 0 else None
+    return numero_vol, dep, arr
 
-    # 2. Extraction des codes IATA dans le titre
-    matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_clean)
-    dep_iata = matches_iata[0] if len(matches_iata) > 0 else None
-    arr_iata = matches_iata[1] if len(matches_iata) > 1 else None
-
-    # 3. Extraction des horaires dans la description
-    dep_time, arr_time = None, None
-    if description_event:
-        matches_time = re.findall(r'\b(\d{2}:?\d{2})\b', description_event)
-        if len(matches_time) > 0:
-            dep_time = matches_time[0].replace(":", "")
-        if len(matches_time) > 1:
-            arr_time = matches_time[1].replace(":", "")
-
-    return numero_vol, dep_iata, dep_time, arr_iata, arr_time
 
 def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     conn = sqlite3.connect(DB_FILE)
@@ -290,63 +248,61 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     conn.close()
 
     if not row or not row[0]:
-        print(f"⚠️ Aucun token Google trouvé en BDD pour le chat_id {pilote_chat_id}")
         return None
 
     try:
         cred_dict = json.loads(row[0])
         creds = Credentials.from_authorized_user_info(cred_dict, SCOPES)
         service = build('calendar', 'v3', credentials=creds)
-        
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.utcnow().isoformat() + 'Z'
+
         events_result = service.events().list(
             calendarId='primary', timeMin=now,
-            maxResults=15, singleEvents=True,
+            maxResults=20, singleEvents=True,
             orderBy='startTime').execute()
         events = events_result.get('items', [])
 
-        print(f"🔎 {len(events)} événement(s) trouvé(s) dans l'agenda.")
-
         for event in events:
             titre = event.get('summary', '')
-            description = event.get('description', '')
-            
-            numero_vol, dep_iata, dep_time, arr_iata, arr_time = extraire_infos_vol(titre, description)
+            numero_vol, dep, arr = extraire_infos_vol(titre)
 
-            if numero_vol and dep_iata:
+            if numero_vol:
                 debut_str = event['start'].get('dateTime', event['start'].get('date'))
                 debut_dt = datetime.datetime.fromisoformat(debut_str)
                 return {
                     "numero": numero_vol,
-                    "dep_iata": dep_iata,
-                    "dep_nom": nom_aeroport(dep_iata),
-                    "dep_time": dep_time,
-                    "arr_iata": arr_iata,
-                    "arr_nom": nom_aeroport(arr_iata),
-                    "arr_time": arr_time,
+                    "dep": dep,
+                    "arr": arr,
                     "titre": titre,
                     "debut_dt": debut_dt
                 }
-        print("❌ Aucun vol valide trouvé.")
         return None
     except Exception as e:
         print(f"❌ Erreur API Google Calendar : {e}")
         return None
 
 
-def verifier_ads_b(numero_vol, dep_iata=None):
+def verifier_ads_b(numero_vol, dep=None):
+    """
+    Interroge OpenSky Network et filtre intelligemment par :
+    1. Le préfixe de la compagnie (ex: 3V -> TAY ou équivalent, ou le numéro lui-même)
+    2. La position au départ de l'aéroport si l'indicatif exact est masqué.
+    """
     url = "https://opensky-network.org/api/states/all"
+    
+    # Générer des variantes de recherche basées sur le numéro commercial et le préfixe
     candidats = [numero_vol.strip().upper()]
     
-    prefixe = re.match(r'^([A-Z0-9]{2})', numero_vol.upper())
-    if prefixe:
-        candidats.append(prefixe.group(1))
+    # Extraire les 2 lettres de la compagnie (ex: 3V -> TAY pour ASL, AF -> AFR, etc.)
+    prefixe_compagnie = re.match(r'^([A-Z0-9]{2})', numero_vol.upper())
+    if prefixe_compagnie:
+        candidats.append(prefixe_compagnie.group(1))
 
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             states = response.json().get("states", [])
-            print(f"🔍 [OpenSky] {len(states)} aéronefs reçus. Filtrage candidat : {candidats}")
+            print(f"🔍 [OpenSky] {len(states)} aéronefs reçus. Filtrage avec candidats : {candidats}")
 
             for state in states:
                 callsign = state[1]
@@ -356,11 +312,13 @@ def verifier_ads_b(numero_vol, dep_iata=None):
                         if cand in callsign_clean:
                             on_ground = state[8]
                             alt_ft = int(state[7] * 3.28084) if state[7] is not None else 0
+                            print(f"🎯 [TROUVÉ] Correspondance OpenSky : '{callsign_clean}' | Au sol: {on_ground}")
                             return {
                                 "etat_brut": on_ground,
                                 "etat": "Au sol 🟢" if on_ground else "En vol ✈️",
                                 "altitude": f"{alt_ft} ft"
                             }
+            print(f"❌ [OpenSky] Aucun vol correspondant trouvé pour {candidats}.")
     except Exception as e:
         print(f"⚠️ Erreur requête OpenSky : {e}")
     return None
@@ -404,7 +362,7 @@ def background_flight_monitor():
                 delta_heures = (debut_dt - maintenant).total_seconds() / 3600
 
                 if -12 <= delta_heures <= 12:
-                    radar = verifier_ads_b(vol['numero'], vol['dep_iata'])
+                    radar = verifier_ads_b(vol['numero'], vol['dep'])
                     if not radar:
                         continue
 
@@ -428,29 +386,15 @@ def background_flight_monitor():
                         ''', (pilote_chat_id, vol['numero'], etat_actuel))
                         conn.commit()
 
-                        eta_str = f" ➔ Arrivée estimée à `{vol['arr_time']} UTC`" if vol['arr_time'] else ""
-
                         if ancien_etat == "AU_SOL" and etat_actuel == "EN_VOL":
-                            texte_alerte = (
-                                f"🛫 **ALERTE DÉCOLLAGE !**\n\n"
-                                f"Le vol `{vol['numero']}` a décollé de **{vol['dep_nom']}** (`{vol['dep_iata']}`) "
-                                f"à destination de **{vol['arr_nom']}** (`{vol['arr_iata']}`).\n"
-                                f"Altitude actuelle : {radar['altitude']}{eta_str}"
-                            )
+                            texte_alerte = f"🛫 **ALERTE DÉCOLLAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient de décoller !\nAltitude : {radar['altitude']}"
                         elif ancien_etat == "EN_VOL" and etat_actuel == "AU_SOL":
-                            texte_alerte = (
-                                f"🛬 **ALERTE ATTERRISSAGE !**\n\n"
-                                f"Le vol `{vol['numero']}` vient d'atterrir à **{vol['arr_nom']}** (`{vol['arr_iata']}`)."
-                            )
+                            texte_alerte = f"🛬 **ALERTE ATTERRISSAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient d'atterrir."
                         else:
                             if etat_actuel == "EN_VOL":
-                                texte_alerte = (
-                                    f"🛫 **ALERTE EN VOL !**\n\n"
-                                    f"Le vol `{vol['numero']}` est détecté en vol vers **{vol['arr_nom']}**.\n"
-                                    f"Altitude : {radar['altitude']}{eta_str}"
-                                )
+                                texte_alerte = f"🛫 **ALERTE EN VOL !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est détecté en vol !\nAltitude : {radar['altitude']}"
                             else:
-                                texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` est actuellement **{radar['etat']}**."
+                                texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est actuellement **{radar['etat']}**."
 
                         destinataires = [pilote_chat_id]
                         c.execute('SELECT chat_id FROM proches WHERE pilote_chat_id = ?', (pilote_chat_id,))
@@ -598,17 +542,16 @@ def lancer_bot_interactif():
                         if not vol:
                             envoyer_message_telegram(chat_id, "❌ Aucun vol valide trouvé dans l'agenda.")
                         else:
-                            live = verifier_ads_b(vol['numero'], vol['dep_iata'])
+                            live = verifier_ads_b(vol['numero'], vol['dep'])
                             statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar."
                             link_fr24 = f"https://www.flightradar24.com/data/flights/{vol['numero']}"
 
-                            eta_str = f" (Arrivée estimée : {vol['arr_time']} UTC)" if vol['arr_time'] else ""
-
                             reponse = (
                                 f"✈️ **Prochain vol trouvé :**\n\n"
-                                f"• **Vol :** `{vol['numero']}`\n"
-                                f"• **Départ :** {vol['dep_nom']} (`{vol['dep_iata']}`) à {vol['dep_time'] or 'N/A'} UTC\n"
-                                f"• **Destination :** {vol['arr_nom']} (`{vol['arr_iata']}`){eta_str}\n\n"
+                                f"• **Titre :** {vol['titre']}\n"
+                                f"• **Vol identifié :** `{vol['numero']}`\n"
+                                f"• **Trajet :** {vol['dep']} ➔ {vol['arr']}\n"
+                                f"• **Départ prévu :** {vol['debut_dt'].strftime('%d/%m/%Y à %H:%M')}\n\n"
                                 f"📡 **Statut radar :**\n{statut_live}\n\n"
                                 f"🔗 [Suivre sur Flightradar24]({link_fr24})"
                             )
@@ -635,6 +578,7 @@ def lancer_bot_interactif():
         time.sleep(2)
 
 
+# Lancement global propre
 if __name__ == '__main__':
     threading.Thread(target=lancer_bot_interactif, daemon=True).start()
     threading.Thread(target=background_flight_monitor, daemon=True).start()
