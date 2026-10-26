@@ -34,7 +34,6 @@ if os.path.exists(JSON_FILE_PATH):
         print(f"⚠️ Erreur lors de la lecture de {JSON_FILE_PATH} : {e}")
 else:
     print(f"⚠️ Fichier {JSON_FILE_PATH} introuvable. Utilisation du dictionnaire de secours par défaut.")
-    # Dictionnaire de secours si le fichier n'est pas encore poussé sur Render
     AEROPORTS_IATA = {
         "EDI": "Édimbourg (Écosse)",
         "MME": "Teesside / Middlesbrough (UK)",
@@ -255,18 +254,18 @@ def extraire_infos_vol(titre_event, description_event=""):
     """
     Extrait le numéro de vol et les aéroports depuis le titre,
     et cherche les horaires UTC dans la description si disponibles.
-    Exexmple titre : "3V4717  EDI-MME"
+    Exemple titre : "3V4717  EDI-MME"
     """
     # 1. Extraction du numéro de vol (ex: 3V4717)
     match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)\b', titre_event, re.IGNORECASE)
     numero_vol = match_vol.group(1).replace(" ", "").upper() if match_vol else None
 
-    # 2. Extraction des codes IATA aéroports (ex: EDI, MME)
+    # 2. Extraction des aéroports depuis le titre (ex: EDI, MME)
     matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_event)
     dep_iata = matches_iata[0] if len(matches_iata) > 0 else None
     arr_iata = matches_iata[1] if len(matches_iata) > 1 else None
-    
-    # 3. Extraction optionnelle des horaires depuis la description
+
+    # 3. Recherche des horaires dans la description
     dep_time, arr_time = None, None
     if description_event:
         matches_time = re.findall(r'\b(\d{2}:?\d{2})\b', description_event)
@@ -276,6 +275,7 @@ def extraire_infos_vol(titre_event, description_event=""):
             arr_time = matches_time[1].replace(":", "")
 
     return numero_vol, dep_iata, dep_time, arr_iata, arr_time
+
 
 def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     conn = sqlite3.connect(DB_FILE)
@@ -301,7 +301,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
         for event in events:
             titre = event.get('summary', '')
-            description = event.get('description', '')
+            description = event.get('description', '')  # Récupération de la description
             
             numero_vol, dep_iata, dep_time, arr_iata, arr_time = extraire_infos_vol(titre, description)
 
