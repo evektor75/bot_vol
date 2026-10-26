@@ -18,12 +18,13 @@ os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CLIENT_SECRET_JSON = os.environ.get("GOOGLE_CLIENT_SECRET_JSON")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
+AIRLABS_API_KEY = "15c858b9-979c-459e-b701-3a153a54f1ce"
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (Mode Autonome OpenSky + Aéroports/Préfixe)")
+print("🤖 Démarrage du bot Telegram (Mode AirLabs + Google Calendar)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -225,14 +226,9 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None)
 
 
 def extraire_infos_vol(titre_event):
-    """
-    Extrait le numéro de vol, l'aéroport de départ et d'arrivée du titre eCrew.
-    Exemple de titre : "3V4717 - EDI (2011) - MME (2100)"
-    """
     match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)\b', titre_event, re.IGNORECASE)
     numero_vol = match_vol.group(1).replace(" ", "").upper() if match_vol else None
 
-    # Extraction des aéroports (ex: - EDI (...) - MME (...))
     aeroports = re.findall(r'\b([A-Z]{3})\b', titre_event)
     dep = aeroports[0] if len(aeroports) > 0 else None
     arr = aeroports[1] if len(aeroports) > 1 else None
@@ -284,43 +280,46 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
 def verifier_ads_b(numero_vol, dep=None):
     """
-    Interroge OpenSky Network et filtre intelligemment par :
-    1. Le préfixe de la compagnie (ex: 3V -> TAY ou équivalent, ou le numéro lui-même)
-    2. La position au départ de l'aéroport si l'indicatif exact est masqué.
+    Interroge l'API AirLabs pour récupérer directement le statut du vol par son numéro (ex: 3V4717).
+    Retourne l'état, l'altitude et l'indicatif réel s'il est en vol.
     """
-    url = "https://opensky-network.org/api/states/all"
-    
-    # Générer des variantes de recherche basées sur le numéro commercial et le préfixe
-    candidats = [numero_vol.strip().upper()]
-    
-    # Extraire les 2 lettres de la compagnie (ex: 3V -> TAY pour ASL, AF -> AFR, etc.)
-    prefixe_compagnie = re.match(r'^([A-Z0-9]{2})', numero_vol.upper())
-    if prefixe_compagnie:
-        candidats.append(prefixe_compagnie.group(1))
+    url = "https://airlabs.co/api/v9/flights"
+    params = {
+        "api_key": AIRLABS_API_KEY,
+        "flight_iata": numero_vol.strip().upper()
+    }
 
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
-            states = response.json().get("states", [])
-            print(f"🔍 [OpenSky] {len(states)} aéronefs reçus. Filtrage avec candidats : {candidats}")
+            data = response.json()
+            flights = data.get("response", [])
+            print(f"🔍 [AirLabs] Requête pour {numero_vol} -> {len(flights)} résultat(s) trouvé(s).")
 
-            for state in states:
-                callsign = state[1]
-                if callsign:
-                    callsign_clean = callsign.strip().upper()
-                    for cand in candidats:
-                        if cand in callsign_clean:
-                            on_ground = state[8]
-                            alt_ft = int(state[7] * 3.28084) if state[7] is not None else 0
-                            print(f"🎯 [TROUVÉ] Correspondance OpenSky : '{callsign_clean}' | Au sol: {on_ground}")
-                            return {
-                                "etat_brut": on_ground,
-                                "etat": "Au sol 🟢" if on_ground else "En vol ✈️",
-                                "altitude": f"{alt_ft} ft"
-                            }
-            print(f"❌ [OpenSky] Aucun vol correspondant trouvé pour {candidats}.")
+            if flights:
+                flight = flights[0]
+                is_ground = flight.get("is_ground", 0)
+                alt_m = flight.get("alt", 0)
+                alt_ft = int(alt_m * 3.28084) if alt_m is not None else 0
+                callsign = flight.get("reg", "Inconnu") # ou flight.get("flight_icao")
+
+                # Si is_ground est 0 ou False, l'avion est en vol
+                etat_brut = True if is_ground == 1 else False
+                
+                return {
+                    "etat_brut": etat_brut,
+                    "etat": "Au sol 🟢" if etat_brut else "En vol ✈️",
+                    "altitude": f"{alt_ft} ft"
+                }
+            else:
+                # Aucun vol actif en cours dans AirLabs (probablement au parking / pas encore parti)
+                return {
+                    "etat_brut": True,
+                    "etat": "Au sol 🟢 (ou non démarré)",
+                    "altitude": "0 ft"
+                }
     except Exception as e:
-        print(f"⚠️ Erreur requête OpenSky : {e}")
+        print(f"⚠️ Erreur requête AirLabs : {e}")
     return None
 
 
@@ -536,7 +535,7 @@ def lancer_bot_interactif():
                             )
                             continue
 
-                        envoyer_message_telegram(chat_id, "🔍 Recherche du prochain vol filtré...")
+                        envoyer_message_telegram(chat_id, "🔍 Recherche du prochain vol via AirLabs...")
                         vol = obtenir_prochain_vol_pour_pilote(pilote_target_id)
 
                         if not vol:
@@ -552,7 +551,7 @@ def lancer_bot_interactif():
                                 f"• **Vol identifié :** `{vol['numero']}`\n"
                                 f"• **Trajet :** {vol['dep']} ➔ {vol['arr']}\n"
                                 f"• **Départ prévu :** {vol['debut_dt'].strftime('%d/%m/%Y à %H:%M')}\n\n"
-                                f"📡 **Statut radar :**\n{statut_live}\n\n"
+                                f"📡 **Statut AirLabs :**\n{statut_live}\n\n"
                                 f"🔗 [Suivre sur Flightradar24]({link_fr24})"
                             )
                             envoyer_message_telegram(chat_id, reponse)
