@@ -22,9 +22,39 @@ AIRLABS_API_KEY = os.environ.get("AIRLABS_API_KEY")
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
+# --- CHARGEMENT DU FICHIER JSON DES AÉROPORTS ---
+AEROPORTS_IATA = {}
+JSON_FILE_PATH = "aeroports.json"
+
+if os.path.exists(JSON_FILE_PATH):
+    try:
+        with open(JSON_FILE_PATH, "r", encoding="utf-8") as f:
+            AEROPORTS_IATA = json.load(f)
+        print(f"✅ Fichier {JSON_FILE_PATH} chargé avec succès ({len(AEROPORTS_IATA)} aéroports).")
+    except Exception as e:
+        print(f"⚠️ Erreur lors de la lecture de {JSON_FILE_PATH} : {e}")
+else:
+    print(f"⚠️ Fichier {JSON_FILE_PATH} introuvable. Utilisation d'un dictionnaire de secours.")
+    AEROPORTS_IATA = {
+        "EDI": "Édimbourg",
+        "MME": "Teesside",
+        "CDG": "Paris CDG",
+        "ORY": "Paris Orly",
+        "LGG": "Liège",
+        "BRU": "Bruxelles",
+        "FRA": "Francfort",
+        "TLV": "Tel-Aviv",
+        "CMN": "Casablanca"
+    }
+
+def nom_aeroport(code_iata):
+    if not code_iata:
+        return "Inconnu"
+    return AEROPORTS_IATA.get(code_iata.upper(), f"{code_iata.upper()}")
+
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (Mode AirLabs + Google Calendar)")
+print("🤖 Démarrage du bot Telegram (AirLabs + Aéroports en clair)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -32,21 +62,11 @@ if not TELEGRAM_TOKEN:
 else:
     print(f"✅ TELEGRAM_TOKEN présent (longueur={len(TELEGRAM_TOKEN)})")
 
-if not RENDER_EXTERNAL_URL or RENDER_EXTERNAL_URL.startswith("http://localhost"):
-    print(f"⚠️  ATTENTION : RENDER_EXTERNAL_URL non défini en prod → {RENDER_EXTERNAL_URL}")
-else:
-    print(f"✅ RENDER_EXTERNAL_URL = {RENDER_EXTERNAL_URL}")
-
-if not CLIENT_SECRET_JSON:
-    print("⚠️  ATTENTION : GOOGLE_CLIENT_SECRET_JSON manquant → OAuth Google désactivé.")
-else:
-    print("✅ GOOGLE_CLIENT_SECRET_JSON présent.")
-
 if not AIRLABS_API_KEY:
     print("⚠️  ATTENTION : AIRLABS_API_KEY manquant dans l'environnement !")
 else:
     print("✅ AIRLABS_API_KEY présent.")
-# --- SUPPRESSION DU WEBHOOK ---
+
 def supprimer_webhook_telegram():
     if not TELEGRAM_TOKEN:
         return
@@ -283,10 +303,6 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
 
 def verifier_ads_b(numero_vol, dep=None):
-    """
-    Interroge l'API AirLabs pour récupérer directement le statut du vol par son numéro (ex: 3V4717).
-    Retourne l'état, l'altitude et l'indicatif réel s'il est en vol.
-    """
     url = "https://airlabs.co/api/v9/flights"
     params = {
         "api_key": AIRLABS_API_KEY,
@@ -305,9 +321,7 @@ def verifier_ads_b(numero_vol, dep=None):
                 is_ground = flight.get("is_ground", 0)
                 alt_m = flight.get("alt", 0)
                 alt_ft = int(alt_m * 3.28084) if alt_m is not None else 0
-                callsign = flight.get("reg", "Inconnu") # ou flight.get("flight_icao")
 
-                # Si is_ground est 0 ou False, l'avion est en vol
                 etat_brut = True if is_ground == 1 else False
                 
                 return {
@@ -316,7 +330,6 @@ def verifier_ads_b(numero_vol, dep=None):
                     "altitude": f"{alt_ft} ft"
                 }
             else:
-                # Aucun vol actif en cours dans AirLabs (probablement au parking / pas encore parti)
                 return {
                     "etat_brut": True,
                     "etat": "Au sol 🟢 (ou non démarré)",
@@ -389,15 +402,18 @@ def background_flight_monitor():
                         ''', (pilote_chat_id, vol['numero'], etat_actuel))
                         conn.commit()
 
+                        dep_clair = nom_aeroport(vol['dep'])
+                        arr_clair = nom_aeroport(vol['arr'])
+
                         if ancien_etat == "AU_SOL" and etat_actuel == "EN_VOL":
-                            texte_alerte = f"🛫 **ALERTE DÉCOLLAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient de décoller !\nAltitude : {radar['altitude']}"
+                            texte_alerte = f"🛫 **ALERTE DÉCOLLAGE !**\n\nLe vol `{vol['numero']}` ({dep_clair} ➔ {arr_clair}) vient de décoller !\nAltitude : {radar['altitude']}"
                         elif ancien_etat == "EN_VOL" and etat_actuel == "AU_SOL":
-                            texte_alerte = f"🛬 **ALERTE ATTERRISSAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient d'atterrir."
+                            texte_alerte = f"🛬 **ALERTE ATTERRISSAGE !**\n\nLe vol `{vol['numero']}` ({dep_clair} ➔ {arr_clair}) vient d'atterrir à **{arr_clair}**."
                         else:
                             if etat_actuel == "EN_VOL":
-                                texte_alerte = f"🛫 **ALERTE EN VOL !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est détecté en vol !\nAltitude : {radar['altitude']}"
+                                texte_alerte = f"🛫 **ALERTE EN VOL !**\n\nLe vol `{vol['numero']}` vers **{arr_clair}** est détecté en vol !\nAltitude : {radar['altitude']}"
                             else:
-                                texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est actuellement **{radar['etat']}**."
+                                texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` ({dep_clair} ➔ {arr_clair}) est actuellement **{radar['etat']}**."
 
                         destinataires = [pilote_chat_id]
                         c.execute('SELECT chat_id FROM proches WHERE pilote_chat_id = ?', (pilote_chat_id,))
@@ -545,16 +561,19 @@ def lancer_bot_interactif():
                         if not vol:
                             envoyer_message_telegram(chat_id, "❌ Aucun vol valide trouvé dans l'agenda.")
                         else:
+                            dep_nom = nom_aeroport(vol['dep'])
+                            arr_nom = nom_aeroport(vol['arr'])
+
                             live = verifier_ads_b(vol['numero'], vol['dep'])
                             statut_live = f"État : {live['etat']} | Altitude : {live['altitude']}" if live else "Avion non détecté sur le radar."
                             link_fr24 = f"https://www.flightradar24.com/data/flights/{vol['numero']}"
 
                             reponse = (
                                 f"✈️ **Prochain vol trouvé :**\n\n"
-                                f"• **Titre :** {vol['titre']}\n"
-                                f"• **Vol identifié :** `{vol['numero']}`\n"
-                                f"• **Trajet :** {vol['dep']} ➔ {vol['arr']}\n"
-                                f"• **Départ prévu :** {vol['debut_dt'].strftime('%d/%m/%Y à %H:%M')}\n\n"
+                                f"• **Vol :** `{vol['numero']}`\n"
+                                f"• **Départ :** {dep_nom} (`{vol['dep']}`)\n"
+                                f"• **Destination :** {arr_nom} (`{vol['arr']}`)\n"
+                                f"• **Prévu le :** {vol['debut_dt'].strftime('%d/%m/%Y à %H:%M')}\n\n"
                                 f"📡 **Statut AirLabs :**\n{statut_live}\n\n"
                                 f"🔗 [Suivre sur Flightradar24]({link_fr24})"
                             )
