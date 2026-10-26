@@ -258,27 +258,17 @@ def extraire_infos_vol(titre_event, description_event=""):
     if not titre_event:
         return None, None, None, None, None
 
-    # Normalisation du titre (remplace espaces insecables et espaces multiples)
-    titre_clean = re.sub(r'\s+', ' ', titre_event).strip()
-
     # 1. Extraction du numéro de vol (ex: 3V4717)
-    match_vol = re.search(r'([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)', titre_clean, re.IGNORECASE)
+    match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)\b', titre_event, re.IGNORECASE)
     numero_vol = match_vol.group(1).replace(" ", "").upper() if match_vol else None
 
-    # 2. Extraction des codes IATA (ex: EDI et MME)
-    # Cherche la structure AERO1-AERO2 ou deux mots de 3 lettres
-    matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_clean)
+    # 2. Extraction robuste des codes IATA (cherche tous les mots de 3 lettres majuscules)
+    matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_event)
     
-    dep_iata = None
-    arr_iata = None
+    dep_iata = matches_iata[0] if len(matches_iata) > 0 else None
+    arr_iata = matches_iata[1] if len(matches_iata) > 1 else None
 
-    if len(matches_iata) >= 2:
-        dep_iata = matches_iata[0]
-        arr_iata = matches_iata[1]
-    elif len(matches_iata) == 1:
-        dep_iata = matches_iata[0]
-
-    # 3. Extraction des horaires dans la description
+    # 3. Extraction des horaires dans la description (ex: HH:MM ou HHMM)
     dep_time, arr_time = None, None
     if description_event:
         matches_time = re.findall(r'\b(\d{2}:?\d{2})\b', description_event)
@@ -288,7 +278,6 @@ def extraire_infos_vol(titre_event, description_event=""):
             arr_time = matches_time[1].replace(":", "")
 
     return numero_vol, dep_iata, dep_time, arr_iata, arr_time
-
 
 def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     conn = sqlite3.connect(DB_FILE)
