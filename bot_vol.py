@@ -252,21 +252,26 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None)
 
 def extraire_infos_vol(titre_event, description_event=""):
     """
-    Extraction simple et directe : le premier élément est le vol, 
-    les deux codes de 3 lettres suivants sont le départ et l'arrivée.
+    Extraction directe basée sur le format eCrew :
+    Titre type '3V4717  EDI-MME' -> Numéro de vol + Départ + Arrivée.
+    Description -> Horaires UTC.
     """
     if not titre_event:
         return None, None, None, None, None
 
-    parts = titre_event.split()
+    # Nettoyage des espaces multiples
+    titre_clean = re.sub(r'\s+', ' ', titre_event).strip()
+
+    # 1. Extraction du numéro de vol (ex: 3V4717)
+    parts = titre_clean.split()
     numero_vol = parts[0].upper() if len(parts) > 0 else None
 
-    # Extraction des codes IATA du titre
-    matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_event)
+    # 2. Extraction des codes IATA dans le titre
+    matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_clean)
     dep_iata = matches_iata[0] if len(matches_iata) > 0 else None
     arr_iata = matches_iata[1] if len(matches_iata) > 1 else None
 
-    # Horaires dans la description
+    # 3. Extraction des horaires dans la description
     dep_time, arr_time = None, None
     if description_event:
         matches_time = re.findall(r'\b(\d{2}:?\d{2})\b', description_event)
@@ -308,7 +313,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
             
             numero_vol, dep_iata, dep_time, arr_iata, arr_time = extraire_infos_vol(titre, description)
 
-            if numero_vol:
+            if numero_vol and dep_iata:
                 debut_str = event['start'].get('dateTime', event['start'].get('date'))
                 debut_dt = datetime.datetime.fromisoformat(debut_str)
                 return {
@@ -322,7 +327,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
                     "titre": titre,
                     "debut_dt": debut_dt
                 }
-        print("❌ Aucun vol trouvé.")
+        print("❌ Aucun vol valide trouvé.")
         return None
     except Exception as e:
         print(f"❌ Erreur API Google Calendar : {e}")
