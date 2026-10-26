@@ -51,7 +51,7 @@ def nom_aeroport(code_iata):
 
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (OpenSky + JSON Aéroports & ETA)")
+print("🤖 Démarrage du bot Telegram (OpenSky optimisé + JSON Aéroports)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -262,7 +262,6 @@ def extraire_infos_vol(titre_event):
     match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)\b', titre_clean, re.IGNORECASE)
     numero_vol = match_vol.group(1).replace(" ", "").upper() if match_vol else None
 
-    # Extraction des aéroports (recherche de tous les codes de 3 lettres majuscules)
     aeroports = re.findall(r'\b([A-Z]{3})\b', titre_clean)
     dep = aeroports[0] if len(aeroports) > 0 else None
     arr = aeroports[1] if len(aeroports) > 1 else None
@@ -314,14 +313,11 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
 
 def verifier_ads_b(numero_vol, dep=None):
     """
-    Interroge OpenSky Network et filtre intelligemment avec des correspondances élargies 
-    (numéro exact, sans espace, et équivalences OACI de compagnies courantes si besoin).
+    Interroge OpenSky Network avec un timeout optimisé (6s) pour éviter les blocages.
     """
     url = "https://opensky-network.org/api/states/all"
     
     candidats = [numero_vol.strip().upper()]
-    
-    # Dictionnaire optionnel de correspondance IATA -> OACI pour certaines compagnies fréquentes (ex: 3V -> TAY)
     correspondance_oaci = {
         "3V": "TAY",
         "FR": "RYR",
@@ -336,17 +332,14 @@ def verifier_ads_b(numero_vol, dep=None):
         p2 = prefixe.group(1)
         candidats.append(p2)
         if p2 in correspondance_oaci:
-            # Remplace le préfixe IATA par le code OACI dans le numéro pour matcher le callsign radar
             code_oaci = correspondance_oaci[p2]
             vol_oaci = numero_vol.upper().replace(p2, code_oaci, 1)
             candidats.append(vol_oaci)
 
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=6)
         if response.status_code == 200:
             states = response.json().get("states", [])
-            print(f"🔍 [OpenSky] {len(states)} aéronefs reçus. Filtrage avec candidats : {candidats}")
-
             for state in states:
                 callsign = state[1]
                 if callsign:
@@ -355,13 +348,11 @@ def verifier_ads_b(numero_vol, dep=None):
                         if cand in callsign_clean:
                             on_ground = state[8]
                             alt_ft = int(state[7] * 3.28084) if state[7] is not None else 0
-                            print(f"🎯 [TROUVÉ] Correspondance OpenSky : '{callsign_clean}' | Au sol: {on_ground}")
                             return {
                                 "etat_brut": on_ground,
                                 "etat": "Au sol 🟢" if on_ground else "En vol ✈️",
                                 "altitude": f"{alt_ft} ft"
                             }
-            print(f"❌ [OpenSky] Aucun vol correspondant trouvé pour {candidats}.")
     except Exception as e:
         print(f"⚠️ Erreur requête OpenSky : {e}")
     return None
@@ -420,8 +411,6 @@ def background_flight_monitor():
                     ancien_etat = row_suivi[1] if row_suivi else None
 
                     if ancien_vol != vol['numero'] or ancien_etat != etat_actuel or ancien_etat is None:
-                        print(f"📡 Changement détecté pour {vol['numero']} : {ancien_etat} ➔ {etat_actuel}")
-
                         c.execute('''
                             INSERT INTO suivi_vols (pilote_chat_id, numero_vol, dernier_etat)
                             VALUES (?, ?, ?)
