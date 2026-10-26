@@ -252,20 +252,33 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None)
 
 def extraire_infos_vol(titre_event, description_event=""):
     """
-    Extrait le numéro de vol et les aéroports depuis le titre,
-    et cherche les horaires UTC dans la description si disponibles.
-    Exemple titre : "3V4717  EDI-MME"
+    Extrait le numéro de vol et les aéroports depuis le titre (ex: '3V4717  EDI-MME'),
+    et cherche les horaires dans la description.
     """
+    if not titre_event:
+        return None, None, None, None, None
+
+    # Normalisation du titre (remplace espaces insecables et espaces multiples)
+    titre_clean = re.sub(r'\s+', ' ', titre_event).strip()
+
     # 1. Extraction du numéro de vol (ex: 3V4717)
-    match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)\b', titre_event, re.IGNORECASE)
+    match_vol = re.search(r'([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)', titre_clean, re.IGNORECASE)
     numero_vol = match_vol.group(1).replace(" ", "").upper() if match_vol else None
 
-    # 2. Extraction des aéroports depuis le titre (ex: EDI, MME)
-    matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_event)
-    dep_iata = matches_iata[0] if len(matches_iata) > 0 else None
-    arr_iata = matches_iata[1] if len(matches_iata) > 1 else None
+    # 2. Extraction des codes IATA (ex: EDI et MME)
+    # Cherche la structure AERO1-AERO2 ou deux mots de 3 lettres
+    matches_iata = re.findall(r'\b([A-Z]{3})\b', titre_clean)
+    
+    dep_iata = None
+    arr_iata = None
 
-    # 3. Recherche des horaires dans la description
+    if len(matches_iata) >= 2:
+        dep_iata = matches_iata[0]
+        arr_iata = matches_iata[1]
+    elif len(matches_iata) == 1:
+        dep_iata = matches_iata[0]
+
+    # 3. Extraction des horaires dans la description
     dep_time, arr_time = None, None
     if description_event:
         matches_time = re.findall(r'\b(\d{2}:?\d{2})\b', description_event)
@@ -285,27 +298,33 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     conn.close()
 
     if not row or not row[0]:
+        print(f"⚠️ Aucun token Google trouvé en BDD pour le chat_id {pilote_chat_id}")
         return None
 
     try:
         cred_dict = json.loads(row[0])
         creds = Credentials.from_authorized_user_info(cred_dict, SCOPES)
         service = build('calendar', 'v3', credentials=creds)
-        now = datetime.datetime.utcnow().isoformat() + 'Z'
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         events_result = service.events().list(
             calendarId='primary', timeMin=now,
-            maxResults=20, singleEvents=True,
+            maxResults=30, singleEvents=True,
             orderBy='startTime').execute()
         events = events_result.get('items', [])
 
+        print(f"🔎 {len(events)} événement(s) récupéré(s) depuis l'agenda principal Google.")
+
         for event in events:
             titre = event.get('summary', '')
-            description = event.get('description', '')  # Récupération de la description
+            description = event.get('description', '')
             
+            print(f"📅 Événement scanné -> Titre: '{titre}'")
+
             numero_vol, dep_iata, dep_time, arr_iata, arr_time = extraire_infos_vol(titre, description)
 
-            if numero_vol:
+            if numero_vol and dep_iata:
+                print(f"✅ Vol valide extrait : {numero_vol} ({dep_iata} -> {arr_iata})")
                 debut_str = event['start'].get('dateTime', event['start'].get('date'))
                 debut_dt = datetime.datetime.fromisoformat(debut_str)
                 return {
@@ -319,6 +338,7 @@ def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
                     "titre": titre,
                     "debut_dt": debut_dt
                 }
+        print("❌ Aucun événement ne correspond aux critères de numéro de vol et d'aéroports.")
         return None
     except Exception as e:
         print(f"❌ Erreur API Google Calendar : {e}")
