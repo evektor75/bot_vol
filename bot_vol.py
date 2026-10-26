@@ -18,7 +18,7 @@ os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CLIENT_SECRET_JSON = os.environ.get("GOOGLE_CLIENT_SECRET_JSON")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
-AIRLABS_API_KEY = "15c858b9-979c-459e-b701-3a153a54f1ce"
+AIRLABS_API_KEY = os.environ.get("AIRLABS_API_KEY")
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
@@ -42,6 +42,10 @@ if not CLIENT_SECRET_JSON:
 else:
     print("✅ GOOGLE_CLIENT_SECRET_JSON présent.")
 
+if not AIRLABS_API_KEY:
+    print("⚠️  ATTENTION : AIRLABS_API_KEY manquant dans l'environnement !")
+else:
+    print("✅ AIRLABS_API_KEY présent.")
 # --- SUPPRESSION DU WEBHOOK ---
 def supprimer_webhook_telegram():
     if not TELEGRAM_TOKEN:
