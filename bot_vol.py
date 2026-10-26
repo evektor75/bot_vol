@@ -23,7 +23,7 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (Mode Automatique Corrigé)")
+print("🤖 Démarrage du bot Telegram (Mode Diagnostic ADS-B)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -282,16 +282,24 @@ def verifier_ads_b(numero_vol):
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             states = response.json().get("states", [])
+            print(f"🔍 [OpenSky] {len(states)} aéronefs reçus au total sur le radar.")
+            
+            # Afficher quelques callsigns pour diagnostic dans les logs Render
+            echantillon = [s[1].strip() for s in states[:10] if s[1]]
+            print(f"🔍 [OpenSky] Échantillon de callsigns vus : {echantillon}")
+
             for state in states:
                 callsign = state[1]
                 if callsign and numero_vol.strip().upper() in callsign.strip().upper():
                     on_ground = state[8]
                     alt_ft = int(state[7] * 3.28084) if state[7] is not None else 0
+                    print(f"🎯 [TROUVÉ] Vol {numero_vol} matché avec le callsign OpenSky : '{callsign.strip()}' | Au sol: {on_ground}")
                     return {
-                        "etat_brut": on_ground,  # True = au sol, False = en vol
+                        "etat_brut": on_ground,
                         "etat": "Au sol 🟢" if on_ground else "En vol ✈️",
                         "altitude": f"{alt_ft} ft"
                     }
+            print(f"❌ [OpenSky] Vol recherché '{numero_vol}' INTROUVABLE dans la liste globale.")
     except Exception as e:
         print(f"⚠️ Erreur requête OpenSky : {e}")
     return None
@@ -310,11 +318,10 @@ def verifier_statut_utilisateur(chat_id):
 
 
 # ---------------------------------------------------------------------------
-# TÂCHE DE FOND AUTOMATIQUE CORRIGÉE
+# TÂCHE DE FOND AUTOMATIQUE (AVEC DIAGNOSTIC)
 # ---------------------------------------------------------------------------
 def background_flight_monitor():
-    """Vérifie périodiquement les vols et force l'alerte dès qu'un changement d'état est détecté."""
-    print("🛰️ Thread de surveillance automatique des vols démarré.")
+    print("🛰️ Thread de surveillance automatique des vols (Mode Diagnostic) démarré.")
     while True:
         try:
             conn = sqlite3.connect(DB_FILE)
@@ -326,7 +333,10 @@ def background_flight_monitor():
             for (pilote_chat_id,) in pilotes:
                 vol = obtenir_prochain_vol_pour_pilote(pilote_chat_id)
                 if not vol:
+                    print("🛰️ [Monitor] Aucun vol trouvé dans l'agenda du pilote.")
                     continue
+
+                print(f"🛰️ [Monitor] Vol trouvé dans l'agenda : {vol['titre']} (Extrait: {vol['numero']})")
 
                 maintenant = datetime.datetime.now(datetime.timezone.utc)
                 debut_dt = vol['debut_dt']
@@ -334,8 +344,8 @@ def background_flight_monitor():
                     debut_dt = debut_dt.replace(tzinfo=datetime.timezone.utc)
 
                 delta_heures = (debut_dt - maintenant).total_seconds() / 3600
+                print(f"🛰️ [Monitor] Delta temps par rapport au début du vol : {delta_heures:.2f} heures.")
 
-                # Fenêtre élargie : de -12h à +12h pour ne rater aucun vol en cours
                 if -12 <= delta_heures <= 12:
                     radar = verifier_ads_b(vol['numero'])
                     if not radar:
@@ -351,11 +361,9 @@ def background_flight_monitor():
                     ancien_vol = row_suivi[0] if row_suivi else None
                     ancien_etat = row_suivi[1] if row_suivi else None
 
-                    # CORRECTION : Si le vol change OU si l'état bascule, ou si l'ancien état n'était pas enregistré
                     if ancien_vol != vol['numero'] or ancien_etat != etat_actuel or ancien_etat is None:
                         print(f"📡 Changement détecté pour {vol['numero']} : {ancien_etat} ➔ {etat_actuel}")
 
-                        # Mettre à jour la base
                         c.execute('''
                             INSERT INTO suivi_vols (pilote_chat_id, numero_vol, dernier_etat)
                             VALUES (?, ?, ?)
@@ -363,19 +371,16 @@ def background_flight_monitor():
                         ''', (pilote_chat_id, vol['numero'], etat_actuel))
                         conn.commit()
 
-                        # Construction du message d'alerte
                         if ancien_etat == "AU_SOL" and etat_actuel == "EN_VOL":
                             texte_alerte = f"🛫 **ALERTE DÉCOLLAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient de décoller !\nAltitude : {radar['altitude']}"
                         elif ancien_etat == "EN_VOL" and etat_actuel == "AU_SOL":
                             texte_alerte = f"🛬 **ALERTE ATTERRISSAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient d'atterrir."
                         else:
-                            # Premier signalement ou reprise en vol directe
                             if etat_actuel == "EN_VOL":
                                 texte_alerte = f"🛫 **ALERTE EN VOL !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est détecté en vol !\nAltitude : {radar['altitude']}"
                             else:
                                 texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est actuellement **{radar['etat']}**."
 
-                        # Récupérer tous les destinataires (pilote + proches)
                         destinataires = [pilote_chat_id]
                         c.execute('SELECT chat_id FROM proches WHERE pilote_chat_id = ?', (pilote_chat_id,))
                         proches = c.fetchall()
@@ -391,11 +396,12 @@ def background_flight_monitor():
                             envoyer_message_telegram(dest_id, message_final)
                     else:
                         conn.close()
+                else:
+                    print(f"🛰️ [Monitor] Vol hors de la fenêtre temporelle de surveillance (-12h/+12h).")
 
         except Exception as e:
             print(f"❌ Erreur dans le thread de surveillance : {e}")
 
-        # Vérification toutes les 2 minutes (120 secondes)
         time.sleep(120)
 
 
