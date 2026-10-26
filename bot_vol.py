@@ -254,17 +254,28 @@ def envoyer_message_telegram(chat_id, texte, parse_mode="Markdown", markup=None)
 def extraire_infos_vol(titre_event):
     """
     Extrait le numéro de vol, aéroports et horaires UTC depuis l'événement eCrew.
-    Exemple de titre : "3V4717 - EDI (2011) - MME (2100)"
+    Gère les formats avec ou sans parenthèses pour les codes IATA.
     """
+    # Extraction du numéro de vol (ex: 3V4717)
     match_vol = re.search(r'\b([A-Z0-9]{2}\s?\d{1,4}[A-Z]*)\b', titre_event, re.IGNORECASE)
     numero_vol = match_vol.group(1).replace(" ", "").upper() if match_vol else None
 
-    matches = re.findall(r'([A-Z]{3})\s*\((?:\w+\s+)?(\d{4})\)', titre_event)
-    dep_iata, dep_time = (matches[0][0], matches[0][1]) if len(matches) > 0 else (None, None)
-    arr_iata, arr_time = (matches[1][0], matches[1][1]) if len(matches) > 1 else (None, None)
+    # Recherche de tous les blocs de 3 lettres majuscules représentant des codes IATA
+    # Optionnel : capture les chiffres entre parenthèses s'ils existent juste après
+    matches = re.findall(r'([A-Z]{3})(?:\s*\((?:\w+\s+)?(\d{4})\))?', titre_event)
+    
+    dep_iata, dep_time = (None, None)
+    arr_iata, arr_time = (None, None)
+
+    if len(matches) > 0:
+        dep_iata = matches[0][0]
+        dep_time = matches[0][1] if len(matches[0]) > 1 and matches[0][1] else None
+        
+    if len(matches) > 1:
+        arr_iata = matches[1][0]
+        arr_time = matches[1][1] if len(matches[1]) > 1 and matches[1][1] else None
 
     return numero_vol, dep_iata, dep_time, arr_iata, arr_time
-
 
 def obtenir_prochain_vol_pour_pilote(pilote_chat_id):
     conn = sqlite3.connect(DB_FILE)
