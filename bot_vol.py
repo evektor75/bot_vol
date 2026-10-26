@@ -23,7 +23,7 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
 # --- LOGS DE DÉMARRAGE CLAIRS ---
 print("=" * 60)
-print("🤖 Démarrage du bot Telegram (Mode Automatique & Claviers)")
+print("🤖 Démarrage du bot Telegram (Mode Automatique Corrigé)")
 print("=" * 60)
 
 if not TELEGRAM_TOKEN:
@@ -79,7 +79,6 @@ def init_db():
             FOREIGN KEY (pilote_chat_id) REFERENCES pilotes (chat_id)
         )
     ''')
-    # Table pour stocker le dernier état connu des vols surveillés (évite les doublons d'alertes)
     c.execute('''
         CREATE TABLE IF NOT EXISTS suivi_vols (
             pilote_chat_id INTEGER PRIMARY KEY,
@@ -293,8 +292,8 @@ def verifier_ads_b(numero_vol):
                         "etat": "Au sol 🟢" if on_ground else "En vol ✈️",
                         "altitude": f"{alt_ft} ft"
                     }
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ Erreur requête OpenSky : {e}")
     return None
 
 
@@ -311,10 +310,10 @@ def verifier_statut_utilisateur(chat_id):
 
 
 # ---------------------------------------------------------------------------
-# TÂCHE DE FOND AUTOMATIQUE (SURVEILLANCE DES VOLS)
+# TÂCHE DE FOND AUTOMATIQUE CORRIGÉE
 # ---------------------------------------------------------------------------
 def background_flight_monitor():
-    """Vérifie périodiquement les vols de tous les pilotes et alerte en cas de décollage/atterrissage."""
+    """Vérifie périodiquement les vols et force l'alerte dès qu'un changement d'état est détecté."""
     print("🛰️ Thread de surveillance automatique des vols démarré.")
     while True:
         try:
@@ -329,24 +328,21 @@ def background_flight_monitor():
                 if not vol:
                     continue
 
-                # On vérifie si le vol est prévu dans les prochaines heures ou en cours (par ex. début < 6h dans le futur ou déjà commencé)
                 maintenant = datetime.datetime.now(datetime.timezone.utc)
-                # Assurons-nous que debut_dt est timezone-aware
                 debut_dt = vol['debut_dt']
                 if debut_dt.tzinfo is None:
                     debut_dt = debut_dt.replace(tzinfo=datetime.timezone.utc)
 
                 delta_heures = (debut_dt - maintenant).total_seconds() / 3600
 
-                # Si le vol est dans moins de 4 heures ou a commencé il y a moins de 12 heures
-                if -12 <= delta_heures <= 4:
+                # Fenêtre élargie : de -12h à +12h pour ne rater aucun vol en cours
+                if -12 <= delta_heures <= 12:
                     radar = verifier_ads_b(vol['numero'])
                     if not radar:
                         continue
 
                     etat_actuel = "AU_SOL" if radar['etat_brut'] else "EN_VOL"
 
-                    # Récupérer l'ancien état stocké
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
                     c.execute('SELECT numero_vol, dernier_etat FROM suivi_vols WHERE pilote_chat_id = ?', (pilote_chat_id,))
@@ -355,8 +351,10 @@ def background_flight_monitor():
                     ancien_vol = row_suivi[0] if row_suivi else None
                     ancien_etat = row_suivi[1] if row_suivi else None
 
-                    # Si c'est un nouveau vol ou si l'état a changé (ex: AU_SOL -> EN_VOL)
-                    if ancien_vol != vol['numero'] or ancien_etat != etat_actuel:
+                    # CORRECTION : Si le vol change OU si l'état bascule, ou si l'ancien état n'était pas enregistré
+                    if ancien_vol != vol['numero'] or ancien_etat != etat_actuel or ancien_etat is None:
+                        print(f"📡 Changement détecté pour {vol['numero']} : {ancien_etat} ➔ {etat_actuel}")
+
                         # Mettre à jour la base
                         c.execute('''
                             INSERT INTO suivi_vols (pilote_chat_id, numero_vol, dernier_etat)
@@ -365,16 +363,19 @@ def background_flight_monitor():
                         ''', (pilote_chat_id, vol['numero'], etat_actuel))
                         conn.commit()
 
-                        # Préparer le message d'alerte automatique
+                        # Construction du message d'alerte
                         if ancien_etat == "AU_SOL" and etat_actuel == "EN_VOL":
                             texte_alerte = f"🛫 **ALERTE DÉCOLLAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient de décoller !\nAltitude : {radar['altitude']}"
                         elif ancien_etat == "EN_VOL" and etat_actuel == "AU_SOL":
                             texte_alerte = f"🛬 **ALERTE ATTERRISSAGE !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) vient d'atterrir."
                         else:
-                            # Premier repérage du vol
-                            texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est actuellement **{radar['etat']}** ({radar['altitude']})."
+                            # Premier signalement ou reprise en vol directe
+                            if etat_actuel == "EN_VOL":
+                                texte_alerte = f"🛫 **ALERTE EN VOL !**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est détecté en vol !\nAltitude : {radar['altitude']}"
+                            else:
+                                texte_alerte = f"✈️ **Point sur le vol :**\n\nLe vol `{vol['numero']}` ({vol['titre']}) est actuellement **{radar['etat']}**."
 
-                        # Trouver tous les destinataires (le pilote + ses proches abonnés)
+                        # Récupérer tous les destinataires (pilote + proches)
                         destinataires = [pilote_chat_id]
                         c.execute('SELECT chat_id FROM proches WHERE pilote_chat_id = ?', (pilote_chat_id,))
                         proches = c.fetchall()
@@ -383,7 +384,6 @@ def background_flight_monitor():
                         
                         conn.close()
 
-                        # Envoyer l'alerte à tout ce monde
                         link_fr24 = f"https://www.flightradar24.com/data/flights/{vol['numero']}"
                         message_final = f"{texte_alerte}\n\n🔗 [Suivre sur Flightradar24]({link_fr24})"
 
@@ -395,8 +395,8 @@ def background_flight_monitor():
         except Exception as e:
             print(f"❌ Erreur dans le thread de surveillance : {e}")
 
-        # Vérification toutes les 3 minutes (180 secondes) pour ne pas saturer l'API OpenSky
-        time.sleep(180)
+        # Vérification toutes les 2 minutes (120 secondes)
+        time.sleep(120)
 
 
 # ---------------------------------------------------------------------------
@@ -558,9 +558,9 @@ def lancer_bot_interactif():
         time.sleep(2)
 
 
-# Lancement global propre (Flask + Bot Polling + Surveillance Automatique)
+# Lancement global propre
 if __name__ == '__main__':
     threading.Thread(target=lancer_bot_interactif, daemon=True).start()
-    threading.Thread(target=background_flight_monitor, daemon=True).start() # Thread automatique
+    threading.Thread(target=background_flight_monitor, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
